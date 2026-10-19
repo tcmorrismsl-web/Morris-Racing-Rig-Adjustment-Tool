@@ -210,6 +210,34 @@ textarea { resize: vertical; }
 .btn.danger { color: var(--led-red); border-color: color-mix(in srgb, var(--led-red) 50%, var(--line)); }
 .form .actions { margin: 4px 0 0; }
 
+/* ---------- Data ---------- */
+.live-card { display: flex; gap: 12px; align-items: center; background: var(--panel); border-radius: var(--radius-m); padding: 14px; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #3a4148; flex: none; }
+.dot.on { background: var(--led-green); box-shadow: 0 0 10px var(--led-green); }
+.setup-steps { margin: 0 0 12px; padding-left: 22px; display: grid; gap: 12px; }
+.setup-steps li::marker { font: 700 18px var(--cond); color: var(--accent); }
+.btn.inline { display: block; margin-top: 10px; text-align: center; text-decoration: none; }
+.findings { display: grid; gap: 10px; }
+.finding { background: var(--panel); border-radius: var(--radius-m); padding: 12px 14px; border-left: 3px solid var(--led-amber); }
+.finding.high { border-left-color: var(--led-red); }
+.finding.low { border-left-color: var(--line); }
+.finding h4 { margin: 0 0 2px; font: 600 20px/1.2 var(--cond); }
+.finding ul { margin: 8px 0 0; padding-left: 20px; }
+.finding li { padding: 2px 0; }
+.session { background: var(--panel); border-radius: var(--radius-m); padding: 12px 14px; margin-bottom: 10px; }
+.session summary { cursor: pointer; }
+.session summary b { font: 600 19px/1.2 var(--cond); }
+.session summary .small { display: block; }
+.laps { width: 100%; border-collapse: collapse; margin: 10px 0 6px; font-size: 15px; }
+.laps th { text-align: left; font-weight: 500; color: var(--muted); padding: 4px 0; }
+.laps td { padding: 5px 0; border-top: 1px solid var(--line); }
+.laps th:nth-child(n+2), .laps td:nth-child(n+2) { text-align: right; }
+.laps tr.best td { color: var(--led-green); font-weight: 600; }
+.laps tr.invalid td { color: var(--muted); }
+.using { margin: 0 0 10px; line-height: 2; }
+.small .seg { display: inline-flex; vertical-align: middle; gap: 4px; }
+.small .seg button { flex: none; padding: 5px 9px; font-size: 15px; }
+
 @media (min-width: 720px) {
   .grid-5 { grid-template-columns: repeat(5, 1fr); }
   .grid-2 { grid-template-columns: repeat(4, 1fr); }

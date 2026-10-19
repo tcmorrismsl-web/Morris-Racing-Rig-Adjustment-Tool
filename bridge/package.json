@@ -1,0 +1,19 @@
+{
+  "name": "morris-racing-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Receives Forza Motorsport and F1 25 telemetry from an Xbox and serves the Morris Racing app on your Wi-Fi.",
+  "bin": "bridge.js",
+  "pkg": {
+    "assets": [
+      "../index.html",
+      "../styles.css",
+      "../icon.svg",
+      "../manifest.webmanifest",
+      "../js/*.js"
+    ],
+    "targets": ["node22-win-x64"],
+    "outputPath": "../dist"
+  }
+}

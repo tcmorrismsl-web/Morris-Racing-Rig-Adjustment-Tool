@@ -2,6 +2,8 @@ import { WHEEL_PROFILES, SWITCH_TIPS, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1
 import { forzaTune, forzaFix, FORZA_ISSUES, DRIVETRAINS } from './forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js';
 import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
@@ -14,24 +16,32 @@ const defaults = {
   forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', tyreWear: true, fuel: false, aero: true },
   f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced' },
   saved: [],
+  links: { forzaCars: {}, forzaTracks: {} }, // Forza car/track numbers from telemetry, linked to your garage and track list
+  dataLaps: '3',
   garage: [normalizeCar({
     id: 'tcr73', name: '2020 Honda #73 LA Honda World Racing Civic Type R TCR', drivetrain: 'fwd', raceCar: true, tyre: 'slick',
     history: [{ date: new Date().toISOString(), changes: ['Added to garage'] }],
   })],
 };
-function load() {
+function load(raw) {
   try {
-    const s = JSON.parse(localStorage.getItem(KEY) || 'null');
+    const s = raw !== undefined ? raw : JSON.parse(localStorage.getItem(KEY) || 'null');
     if (!s) return structuredClone(defaults);
     return {
       ...structuredClone(defaults), ...s,
       forza: { ...defaults.forza, ...s.forza }, f1: { ...defaults.f1, ...s.f1 },
       garage: Array.isArray(s.garage) ? s.garage.map(normalizeCar) : structuredClone(defaults.garage),
+      links: { forzaCars: { ...s.links?.forzaCars }, forzaTracks: { ...s.links?.forzaTracks } },
     };
   } catch { return structuredClone(defaults); }
 }
+let hadLocal = false;
+try { hadLocal = !!localStorage.getItem(KEY); } catch { /* storage unavailable */ }
 const state = load();
-function persist() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage unavailable */ } }
+function persist() {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage unavailable */ }
+  if (live.bridge) putState(state); // keeps a copy on the laptop too
+}
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -391,6 +401,167 @@ async function importGarage(file) {
 }
 
 // ---------------------------------------------------------------------------
+// Data tab: telemetry from the bridge
+// ---------------------------------------------------------------------------
+const trackName = (lap) => {
+  if (lap.game === 'f1') return F1_TRACKS.find((t) => t.id === lap.track?.name)?.name || (lap.track?.id != null ? `Track ${lap.track.id}` : 'Unknown track');
+  const id = lap.context?.trackId || state.links.forzaTracks[lap.track?.ordinal];
+  return FORZA_TRACKS.find((t) => t.id === id)?.name || (lap.track?.ordinal != null ? `Track #${lap.track.ordinal}` : 'Unknown track');
+};
+const lapCar = (lap) => {
+  if (lap.game !== 'forza') return null;
+  const id = lap.context?.carId || state.links.forzaCars[lap.car?.ordinal];
+  return state.garage.find((c) => c.id === id) || null;
+};
+const carLabel = (lap) => {
+  if (lap.game === 'f1') return lap.car?.format >= 2026 ? '2026 car' : '2025 car';
+  const car = lapCar(lap);
+  return car ? car.name : `PI ${lap.car?.pi ?? '?'} ${dtLabel(lap.car?.drivetrain || 'rwd')} car`;
+};
+
+const GAME_SETUP = {
+  forza: [
+    ['Where', 'Settings, then Gameplay & HUD, then UDP Race Telemetry'],
+    ['Data Out', 'On'],
+    ['Data Out IP address', 'Your laptop address'],
+    ['Data Out IP port', '5300'],
+    ['Data Out packet format', 'Car Dash'],
+  ],
+  f1: [
+    ['Where', 'Settings, then Telemetry Settings'],
+    ['UDP Telemetry', 'On'],
+    ['UDP Broadcast Mode', 'Off'],
+    ['UDP IP Address', 'Your laptop address'],
+    ['UDP Port', '20777'],
+    ['UDP Send Rate', '60Hz'],
+    ['UDP Format', '2025 or 2026 (either works)'],
+  ],
+};
+
+function renderDataSetup() {
+  const g = state.game;
+  view.innerHTML = `
+    <h2>Live data</h2>
+    <p class="lede">Send telemetry from the Xbox to your laptop. You get setting changes worked out from your own laps, and a log of every lap with the car and tune you used.</p>
+    <h3>Set it up once</h3>
+    <ol class="setup-steps">
+      <li><b>Download the bridge to your Windows laptop</b> and unzip it.
+        <a class="btn inline" href="dist/MorrisRacingBridge.zip" download>Download for Windows</a></li>
+      <li><b>Run MorrisRacingBridge.exe.</b> Windows may warn that the app isn't recognised, because it isn't from a big publisher. Choose More info, then Run anyway. If Windows asks about network access, allow Private networks.</li>
+      <li><b>Open the address the bridge shows on your phone</b>, for example http://192.168.1.20:8080. Use that address while racing. This copy of the app can't receive data.</li>
+      <li><b>Point ${esc(gameName(g))} at your laptop</b> with these settings:</li>
+    </ol>
+    <p class="small">${esc(GAME_SETUP[g][0][1])}</p>
+    <div class="rows">${GAME_SETUP[g].slice(1).map(([k, v]) => row(k, v)).join('')}</div>
+    <p class="hint">The laptop and Xbox must be on the same network, and the bridge window must stay open while you race.</p>
+    <h3>Bring your garage across</h3>
+    <p class="small">The laptop address is a separate copy of the app. On the Garage tab here, tap Back up garage, then Restore backup on the laptop address.</p>`;
+}
+
+function liveLine(g) {
+  const s = live.status?.[g];
+  const l = s?.live;
+  const on = live.connected && s?.receiving;
+  const text = !live.connected ? 'Lost connection to the bridge. Check the laptop.'
+    : on ? `Receiving ${gameName(g)} data` : `Waiting for ${gameName(g)} data`;
+  const detail = on && l ? `Lap ${l.lap ?? '–'}, ${l.currentLap != null ? fmtLap(l.currentLap * 1000) : '–'}, ${l.speedKmh ?? 0} km/h, gear ${l.gear ?? '–'}` : on ? '' : 'Start a session with telemetry turned on in the game.';
+  return `<span class="dot${on ? ' on' : ''}" aria-hidden="true"></span><span><b>${esc(text)}</b><br><span class="small">${esc(detail)}</span></span>`;
+}
+
+function renderData() {
+  if (!live.bridge) { renderDataSetup(); return; }
+  const g = state.game;
+  const ctx = live.status?.context?.[g] || {};
+  const liveCar = live.status?.forza?.live;
+  const gameLaps = live.laps.filter((l) => l.game === g);
+  const sess = sessions(gameLaps);
+  const latest = sess[0];
+  const n = state.dataLaps === 'all' ? Infinity : Number(state.dataLaps);
+  const pick = latest ? latest.laps.filter((l) => l.valid !== false).slice(-n) : [];
+  const car = latest ? lapCar(latest.laps.at(-1)) : null;
+  const adv = lapAdvice(pick, { drivetrain: car?.drivetrain });
+  const savedForGame = state.saved.filter((x) => x.game === g);
+
+  const contextForm = g === 'forza' ? `
+      ${field('Car on track', `<select data-ctx="carId"><option value="">Not set</option>${state.garage.map((c) => `<option value="${esc(c.id)}"${c.id === ctx.carId ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}</select>`, true)}
+      ${liveCar?.pi ? `<p class="small wide car-line">The game reports PI ${esc(liveCar.pi)}, ${dtLabel(liveCar.drivetrain || 'rwd')}.</p>` : ''}
+      ${field('Track', `<select data-ctx="trackId"><option value="">Not set</option>${FORZA_TRACKS.map((t) => `<option value="${t.id}"${t.id === ctx.trackId ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`, true)}
+      ${field('Tune in use', `<select data-ctx="tune"><option value="">Not set</option>${savedForGame.map((x) => `<option${x.name === ctx.tune ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`, true)}`
+    : `${field('Setup in use', `<select data-ctx="tune"><option value="">Not set</option>${savedForGame.map((x) => `<option${x.name === ctx.tune ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`, true)}`;
+
+  view.innerHTML = `
+    <h2>Live data</h2>
+    <div class="live-card" id="live-line">${liveLine(g)}</div>
+
+    <h3>What you're driving</h3>
+    <div class="form">${contextForm}
+      <p class="small wide">New laps are logged with these.${g === 'forza' ? ' The game only reports a number for the car and track, so set them once and they are remembered.' : ''}</p>
+    </div>
+
+    <h3>Setting changes from your laps</h3>
+    ${latest ? `<div class="small using">${esc(trackName(latest.laps.at(-1)))}, ${esc(carLabel(latest.laps.at(-1)))}. Using the last ${seg('dataLaps', [{ id: '3', label: '3' }, { id: '5', label: '5' }, { id: 'all', label: 'All' }], state.dataLaps)} laps of this session.</div>` : ''}
+    ${!latest ? '<div class="empty">No laps yet. Drive a couple of laps and the advice appears here.</div>'
+      : pick.length < 2 ? '<div class="empty">Drive at least 2 clean laps in this session for advice.</div>'
+        : adv.findings.length ? `<div class="findings">${adv.findings.map((f) => `
+          <article class="finding ${f.severity}">
+            <h4>${esc(f.title)}</h4>
+            <p class="small">${esc(f.evidence)}</p>
+            <ul>${f.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul>
+          </article>`).join('')}</div>
+          <p class="hint">Make one change, drive 2–3 laps, then check here again.</p>`
+          : '<div class="empty">Nothing stood out over these laps. The car looks balanced, so work on consistency.</div>'}
+
+    <h3>Lap log</h3>
+    ${sess.length ? sess.slice(0, 15).map((ss) => {
+      const st = lapStats(ss.laps);
+      const last = ss.laps.at(-1);
+      const tune = last.context?.tune;
+      return `<details class="session"${ss === latest ? ' open' : ''}>
+        <summary><b>${esc(trackName(last))}</b><span class="small">${esc(carLabel(last))}${tune ? `, tune: ${esc(tune)}` : ''}. ${esc(new Date(ss.laps[0].at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${st ? `. Best ${fmtLap(st.best)}` : ''}</span></summary>
+        <table class="laps"><thead><tr><th>Lap</th><th>Time</th><th>Gap</th></tr></thead><tbody>
+        ${ss.laps.map((l) => `<tr class="${st && l.timeMs === st.best && l.valid !== false ? 'best' : ''}${l.valid === false ? ' invalid' : ''}">
+          <td>${esc(l.lap)}</td><td>${fmtLap(l.timeMs)}${l.valid === false ? ' (invalid)' : ''}</td><td>${st && l.valid !== false ? (l.timeMs === st.best ? 'Best' : `+${((l.timeMs - st.best) / 1000).toFixed(3)}`) : ''}</td></tr>`).join('')}
+        </tbody></table>
+        ${st && st.count > 1 ? `<p class="small">Average ${fmtLap(Math.round(st.avg))}. Consistency: laps within ${(st.spread / 1000).toFixed(2)} s of each other on average.</p>` : ''}
+        <button type="button" class="btn ghost" data-action="delete-session" data-id="${esc(ss.id)}">Delete this session</button>
+      </details>`;
+    }).join('') : '<div class="empty">Completed laps show up here.</div>'}
+    <p class="hint">Laps are saved on the laptop, so nothing is lost if your phone screen locks.</p>`;
+}
+
+async function setContext(key, value) {
+  const g = state.game;
+  const cur = { ...(live.status?.context?.[g] || {}) };
+  cur[key] = value;
+  if (g === 'forza') {
+    const l = live.status?.forza?.live;
+    if (key === 'carId' && value && l?.carOrdinal != null) state.links.forzaCars[l.carOrdinal] = value;
+    if (key === 'trackId' && value && l?.trackOrdinal != null) state.links.forzaTracks[l.trackOrdinal] = value;
+    persist();
+  }
+  const res = await putContext({ [g]: cur });
+  if (res && live.status) live.status.context = res.context;
+  render();
+}
+
+// When Forza reports a car or track that's already linked, set it automatically.
+let autoBusy = false;
+async function autoContext() {
+  const l = live.status?.forza?.live;
+  if (!l || autoBusy) return;
+  const ctx = live.status.context?.forza || {};
+  const carId = state.links.forzaCars[l.carOrdinal];
+  const trackId = state.links.forzaTracks[l.trackOrdinal];
+  if ((carId && carId !== ctx.carId) || (trackId && trackId !== ctx.trackId)) {
+    autoBusy = true;
+    const res = await putContext({ forza: { ...ctx, ...(carId ? { carId } : {}), ...(trackId ? { trackId } : {}) } });
+    if (res && live.status) live.status.context = res.context;
+    autoBusy = false;
+    if (state.tab === 'data') render();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Render + events
 // ---------------------------------------------------------------------------
 function render() {
@@ -401,6 +572,7 @@ function render() {
   else if (state.tab === 'setup') (state.game === 'forza' ? renderForza : renderF1)();
   else if (state.tab === 'fix') renderFix();
   else if (state.tab === 'garage') renderGarage();
+  else if (state.tab === 'data') renderData();
   else renderSaved();
 }
 
@@ -426,6 +598,7 @@ view.addEventListener('click', (e) => {
   const segBtn = e.target.closest('.seg button');
   if (segBtn) {
     const key = segBtn.parentElement.dataset.seg;
+    if (key === 'dataLaps') { state.dataLaps = segBtn.dataset.value; persist(); render(); return; }
     const target = state.game === 'forza' ? state.forza : state.f1;
     target[key] = key === 'era' ? Number(segBtn.dataset.value) : segBtn.dataset.value;
     persist(); render();
@@ -448,6 +621,11 @@ view.addEventListener('click', (e) => {
   }
   if (a === 'tune-car') { selectCar(act.dataset.id); state.tab = 'setup'; persist(); render(); window.scrollTo({ top: 0 }); return; }
   if (a === 'export') { exportGarage(); return; }
+  if (a === 'delete-session') {
+    if (!confirm('Delete this session and its laps?')) return;
+    deleteSession(act.dataset.id).then(() => { render(); toast('Deleted'); });
+    return;
+  }
   if (a === 'wheel-done') { state.wheelSetFor = state.game; persist(); render(); toast(`Wheel set for ${gameName(state.game)}`); window.scrollTo({ top: 0 }); }
   if (a === 'save') saveCurrent();
   if (a === 'delete') {
@@ -479,6 +657,7 @@ view.addEventListener('change', (e) => {
   const el = e.target;
   if (el.matches('[data-import]')) { if (el.files[0]) importGarage(el.files[0]); el.value = ''; return; }
   if (el.closest('#car-form')) return;
+  if (el.dataset.ctx) { setContext(el.dataset.ctx, el.value); return; }
   const target = state.game === 'forza' ? state.forza : state.f1;
   if (el.dataset.field === 'carId') { selectCar(el.value); persist(); render(); return; }
   if (el.dataset.field) { target[el.dataset.field] = el.value; persist(); render(); }
@@ -513,3 +692,28 @@ view.addEventListener('submit', (e) => {
 
 render();
 sweepLeds();
+
+// If this copy of the app was opened from the laptop bridge, switch on live data.
+detectBridge().then(async (isBridge) => {
+  if (!isBridge) return;
+  document.body.classList.add('bridge');
+  if (!hadLocal) {
+    const remote = await getRemoteState();
+    if (remote && typeof remote === 'object') {
+      Object.assign(state, load(remote));
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { /* storage unavailable */ }
+    }
+  }
+  connect((what) => {
+    if (what === 'status') {
+      autoContext();
+      const el = document.getElementById('live-line');
+      if (state.tab === 'data' && el) el.innerHTML = liveLine(state.game);
+      return;
+    }
+    if (what === 'lap') toast('Lap logged');
+    // Re-render the Data tab unless you're mid-way through picking something.
+    if (state.tab === 'data' && !view.contains(document.activeElement)) render();
+  });
+  render();
+});

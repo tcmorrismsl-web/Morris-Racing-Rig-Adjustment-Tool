@@ -4,7 +4,10 @@
   "type": "module",
   "description": "Wheel settings and setup recommendations for Forza Motorsport and F1 25 on a MOZA R3.",
   "scripts": {
-    "test": "node tests/run.mjs",
+    "test": "node tests/run.mjs && node tests/telemetry.mjs",
+    "bridge": "node bridge/bridge.js",
+    "simulate": "node tests/sim.cjs",
+    "build:bridge": "npx --yes @yao-pkg/pkg@6 bridge/package.json --targets node22-win-x64 --output dist/MorrisRacingBridge.exe",
     "start": "npx --yes serve ."
   }
 }
