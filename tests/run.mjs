@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from '../js/data.js';
 import { forzaTune, forzaFix, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
+import { classFromPi, normalizeCar, upsertCar, diffCar, hasPart, PARTS } from '../js/garage.js';
 
 let n = 0;
 const bad = (s) => /NaN|undefined|null|Infinity/.test(s);
@@ -49,4 +50,37 @@ const fuj = forzaTune({ track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: '
 const arbs = fuj.sections.find((s) => s.title === 'Anti-roll bars').rows.map((r) => Number(r.value));
 assert.ok(arbs[1] > arbs[0], 'FWD rear ARB should be stiffer than front');
 
-console.log(`OK: ${n} combinations checked`);
+// ---------------- Garage ----------------
+assert.equal(classFromPi(300), 'E'); assert.equal(classFromPi(301), 'D'); assert.equal(classFromPi(600), 'B');
+assert.equal(classFromPi(601), 'A'); assert.equal(classFromPi(998), 'P'); assert.equal(classFromPi(999), 'X');
+assert.equal(classFromPi(''), null); assert.equal(classFromPi(1200), null);
+
+const junk = normalizeCar({ name: '  ', pi: 'abc', drivetrain: 'xwd', stats: { speed: 14, handling: '6.27' }, frontPct: 99, tyre: 'nope' });
+assert.equal(junk.name, 'Unnamed car'); assert.equal(junk.pi, null); assert.equal(junk.drivetrain, 'rwd');
+assert.equal(junk.stats.speed, 10); assert.equal(junk.stats.handling, 6.3); assert.equal(junk.frontPct, 80); assert.equal(junk.tyre, 'stock');
+
+let g = upsertCar([], { id: 'c1', name: 'Civic', pi: 652, drivetrain: 'fwd' }, '2026-10-01T00:00:00Z');
+assert.equal(g[0].history[0].changes[0], 'Added to garage');
+g = upsertCar(g, { ...g[0], pi: 705, hp: 340, parts: { ...g[0].parts, diff: true } }, '2026-10-02T00:00:00Z');
+assert.equal(g.length, 1);
+assert.equal(g[0].history.length, 2);
+assert.ok(g[0].history[0].changes.some((c) => c.includes('PI 652 to 705') && c.includes('S class')), JSON.stringify(g[0].history[0]));
+assert.ok(g[0].history[0].changes.includes('Fitted race differential'));
+const same = upsertCar(g, { ...g[0] });
+assert.equal(same[0].history.length, 2, 'Saving with no changes should not log history');
+assert.equal(diffCar(g[0], normalizeCar(g[0])).length, 0);
+
+// Race cars unlock everything but aero; car overrides class/drivetrain in the tune.
+const race = normalizeCar({ name: 'TCR', drivetrain: 'fwd', raceCar: true });
+assert.ok(PARTS.filter(([k]) => k !== 'aero').every(([k]) => hasPart(race, k)));
+assert.equal(hasPart(race, 'aero'), false);
+const road = normalizeCar({ name: 'Road car', pi: 520, drivetrain: 'rwd', frontPct: 58 });
+const t = forzaTune({ track: 'sebring', cls: 'X', drivetrain: 'awd', weather: 'dry', time: 'day', temp: 'mild', length: 'medium', car: road });
+assert.equal(t.cls.id, 'B'); assert.equal(t.drivetrain, 'rwd');
+assert.ok(t.sections.find((s) => s.title === 'Differential').locked, 'Diff should be locked without a race diff');
+assert.ok(!t.sections.find((s) => s.title === 'Tyres').locked);
+const t2 = forzaTune({ track: 'sebring', cls: 'X', drivetrain: 'awd', weather: 'dry', time: 'day', temp: 'mild', length: 'medium', car: race });
+assert.ok(t2.sections.every((s) => !s.locked));
+assert.ok(t2.notes.some((n) => n.includes('Add a PI')));
+
+console.log(`OK: ${n} combinations checked, garage checks passed`);

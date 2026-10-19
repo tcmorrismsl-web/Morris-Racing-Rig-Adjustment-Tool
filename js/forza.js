@@ -4,6 +4,7 @@
 // (springs, ride height, aero, gearing) are given as changes from the car's default tune.
 
 import { FORZA_TRACKS, FORZA_CLASSES } from './data.js';
+import { classFromPi, hasPart, PARTS, TYRES } from './garage.js';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -19,8 +20,11 @@ export const DRIVETRAINS = [
 
 export function forzaTune(input) {
   const track = FORZA_TRACKS.find((t) => t.id === input.track) || FORZA_TRACKS[0];
-  const cls = FORZA_CLASSES.find((c) => c.id === input.cls) || FORZA_CLASSES[4];
-  const dt = input.drivetrain || 'rwd';
+  // A garage car, when chosen, overrides class, drivetrain and aero.
+  const car = input.car || null;
+  const carCls = car ? classFromPi(car.pi) : null;
+  const cls = FORZA_CLASSES.find((c) => c.id === (carCls || input.cls)) || FORZA_CLASSES[4];
+  const dt = (car && car.drivetrain) || input.drivetrain || 'rwd';
   const wet = input.weather === 'wet';
   const night = input.time === 'night';
   // Temperature steps: -1 cool, 0 mild, +1 hot. Night pulls it one step cooler.
@@ -28,7 +32,7 @@ export function forzaTune(input) {
   if (night) temp = Math.max(-1, temp - 1);
   const length = input.length || 'medium'; // sprint | medium | long
   const wear = !!input.tyreWear;
-  const aero = input.aero ?? cls.tier >= 2;
+  const aero = car ? hasPart(car, 'aero') : (input.aero ?? cls.tier >= 2);
   const tier = cls.tier; // 0..3
   const long = length === 'long';
 
@@ -80,6 +84,9 @@ export function forzaTune(input) {
   af += tierAdj; ar += tierAdj;
   af -= track.bumps * 3; ar -= track.bumps * 3;
   if (wet) { af -= 4; ar -= 4; }
+  const fp = car?.frontPct;
+  if (fp >= 56) { af -= 2; ar += 2; }
+  if (fp && fp <= 46) { af += 2; ar -= 2; }
   af = clamp(Math.round(af), 1, 65); ar = clamp(Math.round(ar), 1, 65);
   sections.push({
     title: 'Anti-roll bars',
@@ -87,7 +94,7 @@ export function forzaTune(input) {
       { label: 'Front', value: `${af}`, why: dt === 'fwd' ? 'Soft front lets the driven wheels find grip.' : 'Front set firmer than rear for a stable platform.' },
       { label: 'Rear', value: `${ar}`, why: dt === 'fwd' ? 'Stiff rear is the main fix for front-driver understeer.' : wet ? 'Softened for wet grip.' : 'Softer rear helps traction out of corners.' },
     ],
-    hint: 'Forza scale is 1–65.',
+    hint: fp >= 56 || (fp && fp <= 46) ? `Forza scale is 1–65. Adjusted for this car's ${fp}% front weight.` : 'Forza scale is 1–65.',
   });
 
   // ---------------- Springs & ride height (relative) ----------------
@@ -135,6 +142,8 @@ export function forzaTune(input) {
         { label: 'Rear downforce', value: `${rr}% of slider`, why: track.speed >= 4 ? 'Low drag for the long straights. Add rear if the car is nervous in fast corners.' : track.speed === 1 ? 'Few straights, so grip is worth more than top speed.' : 'Balanced grip and drag.', rel: true },
       ],
     });
+  } else if (car) {
+    sections.push({ title: 'Aero', part: 'aero', rows: [{ label: 'Front and rear downforce', value: 'Not adjustable yet', why: 'Fit adjustable aero in the upgrade shop, then mark it in the Garage.' }] });
   } else {
     notes.push('No adjustable aero selected. If your car has a wing upgrade, turn on "Adjustable aero" for downforce values.');
   }
@@ -185,8 +194,22 @@ export function forzaTune(input) {
     ],
   });
 
+  // ---------------- Which sections this car can actually adjust ----------------
+  const partFor = { 'Springs and ride height': 'suspension', Damping: 'suspension', 'Anti-roll bars': 'arb', Differential: 'diff', Gearing: 'gearing' };
+  if (car) {
+    for (const sec of sections) {
+      const key = sec.part || partFor[sec.title];
+      if (!key || hasPart(car, key)) continue;
+      const part = PARTS.find((p) => p[0] === key);
+      sec.locked = `This car needs ${part[1].toLowerCase()} before you can adjust ${part[2]}. Values are shown for when you fit them.`;
+      if (sec.part === 'aero') sec.locked = null;
+    }
+  }
+
   // ---------------- Notes ----------------
   notes.unshift(track.note);
+  if (car && !carCls) notes.push(`Add a PI for ${car.name} in the Garage so the tune uses the right class. Using ${cls.id} class for now.`);
+  if (car && ['stock', 'street', 'sport'].includes(car.tyre)) notes.push(`${TYRES.find((t) => t.id === car.tyre).label} tyres overheat sooner than race tyres. Aim for the low end of the hot pressure target.`);
   if (tier === 0) notes.push('Low classes often have few tuning options. Tyres, pressures and alignment matter most.');
   if (wet) notes.push('Wet: be gentle on the throttle on exit. Lap 1 grip is lowest until tyres warm.');
   if (night) notes.push('Night: brake markers are harder to see, so brake a little earlier on lap 1.');
@@ -194,7 +217,7 @@ export function forzaTune(input) {
   if (input.fuel) notes.push('Fuel use is on: the car gets lighter through the race, so it will feel more nervous late on.');
   notes.push('If the race is a spec event, tuning may be locked. Wheel settings still apply.');
 
-  return { track, cls, sections, notes };
+  return { track, cls, car, drivetrain: dt, sections, notes };
 }
 
 // ---------------------------------------------------------------------------
