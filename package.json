@@ -1,0 +1,10 @@
+{
+  "name": "morris-racing",
+  "private": true,
+  "type": "module",
+  "description": "Wheel settings and setup recommendations for Forza Motorsport and F1 25 on a MOZA R3.",
+  "scripts": {
+    "test": "node tests/run.mjs",
+    "start": "npx --yes serve ."
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Morris Racing",
+  "short_name": "Morris Racing",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#1b1f23",
+  "theme_color": "#1b1f23",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
