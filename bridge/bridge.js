@@ -196,5 +196,23 @@ function start() {
   process.on('SIGTERM', save);
 }
 
-if (require.main === module) start();
+// If something goes wrong when started by double-click, keep the window open so the message can be read.
+function fatal(e) {
+  console.error('');
+  console.error('  The bridge stopped because of an error:');
+  console.error(`  ${e && e.stack ? e.stack : e}`);
+  console.error('');
+  if (process.stdin.isTTY) {
+    console.error('  Press Enter to close this window.');
+    process.stdin.resume();
+    process.stdin.once('data', () => process.exit(1));
+  } else {
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  process.on('uncaughtException', fatal);
+  try { start(); } catch (e) { fatal(e); }
+}
 module.exports = { onPacket, status, server, start };
