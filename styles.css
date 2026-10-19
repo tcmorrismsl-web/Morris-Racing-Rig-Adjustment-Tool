@@ -60,6 +60,12 @@ h1 {
 .logo .hub { fill: var(--graphite); stroke: var(--alu); }
 .logo .gold { fill: var(--gold); }
 .logo .m { fill: var(--gold); font: 700 11px/1 var(--cond); }
+.logo .rim-fill { fill: var(--accent); }
+.logo .body { fill: #2e343a; stroke: var(--accent); }
+.logo .gold-stroke { stroke: var(--gold); }
+.logo .screen { fill: var(--graphite); stroke: var(--alu); }
+.logo .knob { fill: var(--alu); }
+body[data-game="f1"] .logo-forza, body[data-game="forza"] .logo-f1 { display: none; }
 .game-switch button { white-space: nowrap; }
 @media (max-width: 420px) { h1 { font-size: 22px; gap: 6px; } .logo { width: 30px; height: 30px; } .game-switch button { padding: 6px 11px; } }
 @media (max-width: 380px) { h1 { font-size: 20px; } .top { padding-left: 12px; padding-right: 12px; } }
