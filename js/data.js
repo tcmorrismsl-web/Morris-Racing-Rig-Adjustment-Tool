@@ -48,7 +48,7 @@ export const WHEEL_PROFILES = {
       { key: 'friction', label: 'Natural friction', value: '30%', why: 'Adds the weight of an F1 steering rack.' },
       { key: 'inertia', label: 'Natural inertia', value: '200%', why: 'Lower it if the wheel oscillates under braking.' },
       { key: 'sdd', label: 'Speed-dependent damping', value: '65% from 200 km/h' },
-      { key: 'eq', label: 'FFB equalizer', value: '10 Hz 80, 15 Hz 120, 25 Hz 170, 40 Hz 180, 50 Hz 160' },
+      { key: 'eq', label: 'FFB equalizer', value: '10 Hz 80, 15 Hz 120, 25 Hz 170, 40 Hz 180, 50 Hz 160', why: 'If the phone app doesn\'t show the equalizer, set it once in Pit House. It stays saved on the base.' },
     ],
     game: {
       where: 'Options, then Controller & Vibration Settings, then Force Feedback',
@@ -66,9 +66,29 @@ export const WHEEL_PROFILES = {
   },
 };
 
+// When to use the phone app and when to use Pit House on the PC.
+export const APP_GUIDE = {
+  phone: [
+    'Switching between Forza and F1: preset, steering angle and the other base settings on this page.',
+    'Force feedback tweaks between races.',
+    'Pedal calibration if the throttle or brake reads wrong.',
+  ],
+  pc: [
+    'Firmware updates for the base, wheel and pedals.',
+    'Settings the phone app doesn\'t show, such as the FFB equalizer and FFB curve. Set them once and they stay saved on the base.',
+  ],
+  steps: [
+    'Unplug the base\'s USB cable from the Xbox and plug it into the laptop.',
+    'Hold S1 and S2 on the wheel for 5 seconds to switch to PC mode. The base restarts, and the RPM lights breathe red, yellow and green.',
+    'Open Pit House and make your changes or run the update. Don\'t unplug anything until an update finishes.',
+    'Hold S1 and S2 for 5 seconds again to switch back to Xbox mode. The RPM lights sweep from the sides to the centre.',
+    'Plug the USB cable back into the Xbox.',
+  ],
+};
+
 export const SWITCH_TIPS = [
   'Change the preset first, then the steering angle. Picking a preset after the angle resets it.',
-  'Make the changes in the MOZA Racing app before starting the game.',
+  'Make the changes in the MOZA Racing app on your phone before starting the game. The base can stay plugged into the Xbox.',
   'If there is no force feedback when you get on track, press the Xbox button, go to the Home screen and back, or restart the game. The game lost focus on the wheel.',
   'If menus scroll by themselves, recalibrate the pedals in the app to remove the dead zone.',
 ];

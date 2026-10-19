@@ -167,6 +167,19 @@ select {
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* ---------- Wheel status + app guide ---------- */
+.wheel-status { display: grid; gap: 8px; margin: 0 0 16px; font-size: 15px; color: var(--muted); }
+.app-guide { display: grid; gap: 10px; }
+.app-guide > div { background: var(--panel); border-radius: var(--radius-m); padding: 12px 14px; }
+.app-guide h4 { margin: 0 0 2px; font: 600 19px/1.2 var(--cond); }
+.app-guide ul { margin: 8px 0 0; padding-left: 20px; }
+.app-guide li { padding: 2px 0; }
+.pc-steps { background: var(--panel); border-radius: var(--radius-m); padding: 12px 14px; margin-top: 10px; }
+.pc-steps summary { cursor: pointer; font-weight: 600; }
+.pc-steps ol { padding-left: 22px; margin: 10px 0; }
+.pc-steps li { padding: 4px 0; }
+@media (min-width: 720px) { .app-guide { grid-template-columns: 1fr 1fr; } }
+
 /* ---------- Garage ---------- */
 body[data-game="f1"] .forza-only { display: none; }
 .cars { display: grid; gap: 14px; margin-top: 6px; }

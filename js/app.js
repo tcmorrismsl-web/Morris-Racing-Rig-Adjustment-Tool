@@ -1,4 +1,4 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js';
 import { forzaTune, forzaFix, FORZA_ISSUES, DRIVETRAINS } from './forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js';
 import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js';
@@ -102,7 +102,7 @@ function renderWheel() {
     banner = `
       <section class="switch">
         <h2>Switch the wheel to ${esc(p.name)}</h2>
-        <p class="small">${from ? `Your wheel is set up for ${esc(from.name)}. Change these in the MOZA Racing app, in this order.` : 'Set these in the MOZA Racing app, in this order.'}</p>
+        <p class="small">${from ? `Your wheel is set up for ${esc(from.name)}.` : ''} Open the MOZA Racing app on your phone and change these, in this order. The base can stay plugged into the Xbox.</p>
         <ul class="checklist">
           ${items.map((m, i) => {
             const prev = from?.moza.find((x) => x.key === m.key)?.value;
@@ -114,17 +114,36 @@ function renderWheel() {
         <button type="button" class="btn" data-action="wheel-done">Wheel is set for ${esc(p.name)}</button>
       </section>`;
   }
+  const status = `
+    <div class="wheel-status">
+      <span>Your wheel is set up for</span>
+      ${seg('wheelSetFor', [{ id: 'forza', label: 'Forza' }, { id: 'f1', label: 'F1 25' }, { id: 'unknown', label: 'Not sure' }], state.wheelSetFor || 'unknown')}
+    </div>`;
   view.innerHTML = `
+    ${status}
     ${banner}
-    ${state.wheelSetFor === g ? `<h2>Wheel is set for ${esc(p.name)}</h2><p class="lede">Your MOZA R3 settings for ${esc(p.name)}. Switch games at the top to see what to change.</p>` : ''}
-    <h3>MOZA Racing app</h3>
+    ${state.wheelSetFor === g ? `<h2>Wheel is set for ${esc(p.name)}</h2><p class="lede">Your MOZA R3 settings for ${esc(p.name)}. If that's wrong, change it above and the checklist comes back.</p>` : ''}
+    <h3>MOZA Racing app on your phone</h3>
     <div class="rows">${p.moza.map((m) => row(m.label, m.value, m.why)).join('')}</div>
     <h3>In ${esc(p.name)}</h3>
     <p class="small">${esc(p.game.where)}</p>
     <div class="rows">${p.game.items.map((m) => row(m.label, m.value, m.why)).join('')}</div>
     <p class="hint">${esc(p.game.after)}</p>
     <h3>When you switch games</h3>
-    <ul class="notes">${SWITCH_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>`;
+    <ul class="notes">${SWITCH_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+
+    <h3>Phone app or Pit House?</h3>
+    <div class="app-guide">
+      <div><h4>MOZA Racing app on your phone</h4><p class="small">Use it for everyday changes. It connects over Bluetooth while the base stays plugged into the Xbox.</p>
+        <ul>${APP_GUIDE.phone.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>
+      <div><h4>Pit House on the laptop</h4><p class="small">Only now and then. It needs the base plugged into the laptop by USB, in PC mode.</p>
+        <ul>${APP_GUIDE.pc.map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>
+    </div>
+    <details class="pc-steps">
+      <summary>How to use Pit House, then go back to the Xbox</summary>
+      <ol>${APP_GUIDE.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+      <p class="small">A USB switch box can save swapping cables between the Xbox and laptop, but plug straight into the laptop for firmware updates. MOZA advises against hubs, which can cause the power dips that interrupt updates.</p>
+    </details>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +618,11 @@ view.addEventListener('click', (e) => {
   if (segBtn) {
     const key = segBtn.parentElement.dataset.seg;
     if (key === 'dataLaps') { state.dataLaps = segBtn.dataset.value; persist(); render(); return; }
+    if (key === 'wheelSetFor') {
+      const v = segBtn.dataset.value;
+      state.wheelSetFor = v === 'unknown' ? null : v;
+      persist(); render(); return;
+    }
     const target = state.game === 'forza' ? state.forza : state.f1;
     target[key] = key === 'era' ? Number(segBtn.dataset.value) : segBtn.dataset.value;
     persist(); render();
