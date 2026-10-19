@@ -65,6 +65,8 @@ h1 {
 .logo .gold-stroke { stroke: var(--gold); }
 .logo .screen { fill: var(--graphite); stroke: var(--alu); }
 .logo .knob { fill: var(--alu); }
+.logo .grip { fill: none; stroke: var(--accent); }
+.logo .dial { fill: var(--graphite); stroke: var(--alu); }
 body[data-game="f1"] .logo-forza, body[data-game="forza"] .logo-f1 { display: none; }
 .game-switch button { white-space: nowrap; }
 @media (max-width: 420px) { h1 { font-size: 22px; gap: 6px; } .logo { width: 30px; height: 30px; } .game-switch button { padding: 6px 11px; } }
