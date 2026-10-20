@@ -7,7 +7,6 @@ export const STATS = [
   ['speed', 'Speed'],
   ['handling', 'Handling'],
   ['accel', 'Acceleration'],
-  ['launch', 'Launch'],
   ['braking', 'Braking'],
 ];
 

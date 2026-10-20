@@ -272,7 +272,7 @@ textarea { resize: vertical; }
 .small .seg button { flex: none; padding: 5px 9px; font-size: 15px; }
 
 @media (min-width: 720px) {
-  .grid-5 { grid-template-columns: repeat(5, 1fr); }
+  .grid-5 { grid-template-columns: repeat(4, 1fr); }
   .grid-2 { grid-template-columns: repeat(4, 1fr); }
   .form { grid-template-columns: 1fr 1fr; }
   .form .wide { grid-column: 1 / -1; }
