@@ -15,6 +15,10 @@ On a phone, use "Add to Home Screen" so it opens like an app.
 - **Garage** (Forza): pick from all 552 Forza Motorsport cars (the 499-car launch roster by division from Turn 10's official list, plus DLC, Car Pass and Update 20 cars; type any name for cars from other updates). Track the cars you own with their PI, class, stats, power, weight and fitted tuning parts. Updating a car logs what changed in its upgrade history. Pick a garage car on the Setup tab and the tune uses its class and drivetrain, and flags settings it can't adjust until you fit the parts. Back up and restore the garage as a file to move it between devices.
 - **Fix it**: step-by-step fixes for understeer, oversteer, bumps, lock-ups and more. Forza fixes follow your drivetrain.
 - **Data**: live telemetry from the Xbox. After a few laps it turns what the car is doing (understeer or oversteer by corner phase, wheelspin, lock-ups, bottoming out, tyre temperatures and wear) into specific setting changes, and keeps a lap log with the car, track and tune you used. Needs the bridge below.
+- **Race dashboard** (Data tab, needs the bridge): a live screen for a tablet or a phone turned sideways.
+  - *F1 25*: track map with every car, timing tower (interval or gap to leader, last lap, tyre and age, pit and penalty flags), the game's own pit window and predicted rejoin position, the tyre sets you can fit and whether they reach the end, fuel from the MFD, rain warnings, and on-track changes (brake bias, on-throttle diff, tyre temperatures, ERS) worked out from the last minute of driving.
+  - *Forza Motorsport*: Forza only sends your own car, so the dashboard shows the track map, position, lap timing with a live delta to your best lap, fuel and tyre-wear estimates for the race distance set on the Setup tab, and driving tips. Forza has no in-car setup changes.
+  - Track maps are drawn as cars drive the first lap and saved on the laptop, so they appear straight away next time.
 - **Saved**: keep tunes and setups you like. They are stored in your browser on that device only.
 
 ## Live data (telemetry)
@@ -30,7 +34,7 @@ The Xbox sends telemetry over your home network, which a phone browser can't rec
 
 Either port accepts either game. Laps are saved on the laptop in a `MorrisRacing` folder in your user folder, so nothing is lost if the phone screen locks.
 
-To try it without an Xbox: `npm run bridge`, then `npm run simulate -- forza` (or `f1`, `f1-2026`).
+To try it without an Xbox: `npm run bridge`, then `npm run simulate -- forza` (or `f1`, `f1-2026`) for laps, or `npm run simulate:race -- f1` (or `f1-2026`, `forza`) for a full live race on the dashboard.
 
 ## Accuracy
 

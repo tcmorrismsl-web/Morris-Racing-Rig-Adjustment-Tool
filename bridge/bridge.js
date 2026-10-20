@@ -11,6 +11,7 @@ const os = require('os');
 const path = require('path');
 const { parseForza, parseF1, parseF1Header } = require('./parsers');
 const { ForzaLaps, F1Laps } = require('./laps');
+const { F1Race, ForzaRace } = require('./race');
 
 const VERSION = '1.0.0';
 const arg = (name, def) => {
@@ -21,9 +22,10 @@ const PORTS = { http: arg('http', 8080), forza: arg('forza', 5300), f1: arg('f1'
 const APP_ROOT = path.join(__dirname, '..');
 const DATA_DIR = process.env.MR_DATA || path.join(os.homedir(), 'MorrisRacing');
 const FILES = { laps: path.join(DATA_DIR, 'laps.json'), state: path.join(DATA_DIR, 'app-state.json'), context: path.join(DATA_DIR, 'context.json') };
+const TRACK_DIR = path.join(DATA_DIR, 'tracks');
 const MAX_LAPS = 1000;
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(TRACK_DIR, { recursive: true });
 const readJson = (f, def) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return def; } };
 const timers = {};
 const writeJson = (f, data) => {
@@ -59,6 +61,17 @@ function addLap(lap) {
 const forza = new ForzaLaps(addLap);
 const f1 = new F1Laps(addLap);
 
+// Live race state for the dashboard. Track outlines are saved so the map appears straight away next time.
+const trackStore = {
+  file: (key) => path.join(TRACK_DIR, `${String(key).replace(/[^\w-]/g, '')}.json`),
+  loadTrack(key) { return key ? readJson(this.file(key), null) : null; },
+  saveTrack(key, data) { if (key) { writeJson(this.file(key), data); log(`Saved the track map (${key}).`); } },
+};
+let appState = readJson(FILES.state, null);
+const f1Race = new F1Race(trackStore);
+const forzaRace = new ForzaRace(trackStore, () => appState?.forza?.laps);
+const dashFor = (game) => (game === 'forza' ? forzaRace : game === 'f1' ? f1Race : (forzaRace.lastSeen > f1Race.lastSeen ? forzaRace : f1Race));
+
 // ---------------------------------------------------------------------------
 // UDP: either port accepts either game; the packet itself says which it is.
 // ---------------------------------------------------------------------------
@@ -66,7 +79,9 @@ function onPacket(buf) {
   const h = parseF1Header(buf);
   if (h) {
     stats.f1.packets++; stats.f1.last = Date.now();
-    f1.push(parseF1(buf));
+    const m = parseF1(buf);
+    f1.push(m);
+    f1Race.push(m);
     return;
   }
   const p = parseForza(buf);
@@ -74,6 +89,7 @@ function onPacket(buf) {
     stats.forza.packets++; stats.forza.last = Date.now();
     if (!p.dash && stats.forza.packets % 600 === 1) log('Forza is sending the "Sled" format. Set Packet Format to "Car Dash" in Forza for lap times and tyre data.');
     forza.push(p);
+    forzaRace.push(p);
   }
 }
 
@@ -143,7 +159,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/state') {
       if (req.method === 'GET') return json(res, 200, readJson(FILES.state, null));
-      if (req.method === 'PUT') { const s = await body(req); writeJson(FILES.state, s); return json(res, 200, { ok: true }); }
+      if (req.method === 'PUT') { const s = await body(req); appState = s; writeJson(FILES.state, s); return json(res, 200, { ok: true }); }
+    }
+    if (p === '/api/dash') return json(res, 200, dashFor(url.searchParams.get('game')).state());
+    if (p === '/api/track') return json(res, 200, dashFor(url.searchParams.get('game')).track());
+    if (p === '/dash-events') {
+      const game = url.searchParams.get('game');
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+      const tick = () => { try { res.write(`event: dash\ndata: ${JSON.stringify(dashFor(game).state())}\n\n`); } catch { /* client gone */ } };
+      tick();
+      const timer = setInterval(tick, 100);
+      req.on('close', () => clearInterval(timer));
+      return;
     }
     if (p === '/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });

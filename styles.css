@@ -304,3 +304,5 @@ textarea { resize: vertical; }
 .browse summary .small { float: right; }
 .browse ul { list-style: none; margin: 0; padding: 0 10px 10px; display: grid; gap: 4px; }
 .browse .pick .small { display: inline; margin-left: 6px; }
+
+.dash-link { display: block; text-align: center; text-decoration: none; margin: 12px 0 4px; }

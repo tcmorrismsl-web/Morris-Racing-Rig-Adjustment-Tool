@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121518">
+  <title>Race Dashboard · Morris Racing</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dash.css?v=mvg687ce">
+</head>
+<body data-game="f1">
+  <header class="bar">
+    <a class="back" href="./" aria-label="Back to the app">‹</a>
+    <div class="sess" id="sess">Waiting for data…</div>
+    <div class="sc" id="sc" hidden></div>
+    <div class="conn" id="conn" title="Connection"><i></i><span>Offline</span></div>
+  </header>
+
+  <main class="grid">
+    <section class="panel map-panel" aria-label="Track map">
+      <div class="panel-head"><h2>Track</h2><button type="button" class="mini" id="flip" title="Mirror the map if it looks back to front">Flip</button></div>
+      <svg id="map" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Track map with car positions">
+        <path id="outline" class="outline" d=""/>
+        <path id="outline-in" class="outline-in" d=""/>
+        <g id="dots"></g>
+      </svg>
+      <p class="map-note" id="map-note"></p>
+    </section>
+
+    <section class="panel tower-panel" aria-label="Timing">
+      <div class="panel-head"><h2 id="tower-title">Timing</h2><span class="small" id="tower-sub"></span></div>
+      <div id="tower"></div>
+    </section>
+
+    <section class="panel pit-panel" aria-label="Pit options">
+      <div class="panel-head"><h2>Pit</h2><span class="small" id="pit-sub"></span></div>
+      <div id="pit"></div>
+    </section>
+
+    <section class="panel adj-panel" aria-label="On-track adjustments">
+      <div class="panel-head"><h2 id="adj-title">Adjust on track</h2><span class="small" id="adj-sub"></span></div>
+      <div id="adj"></div>
+      <ul class="events" id="events"></ul>
+    </section>
+  </main>
+
+  <div class="offline" id="offline" hidden>
+    <h1>Race dashboard</h1>
+    <p>This needs live data from the bridge on your laptop.</p>
+    <p>Start the bridge, then open the address it shows on this phone or tablet and tap <b>Race dashboard</b> on the Data tab.</p>
+    <a class="btn" href="./">Back to the app</a>
+  </div>
+
+  <script type="module" src="js/dash.js?v=mvg687ce"></script>
+</body>
+</html>

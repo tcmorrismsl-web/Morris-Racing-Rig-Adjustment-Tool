@@ -1,15 +1,15 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg5buzz';
-import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg5buzz';
-import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg5buzz';
-import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg5buzz';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg5buzz';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg5buzz';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg5buzz';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg687ce';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg687ce';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg687ce';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg687ce';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg687ce';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg687ce';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg687ce';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 19, 11:51 PM'; // set by npm run stamp
+const APP_VERSION = 'Oct 20, 12:16 AM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
@@ -599,6 +599,8 @@ function renderData() {
   view.innerHTML = `
     <h2>Live data</h2>
     <div class="live-card" id="live-line">${liveLine(g)}</div>
+    <a class="btn dash-link" href="dash.html?game=${g}">Race dashboard</a>
+    <p class="small">Track map, ${g === 'f1' ? 'timing tower, pit options and on-track adjustments' : 'lap timing with a live delta, fuel and tyre estimates and driving tips'}. Best on a tablet or a phone turned sideways.</p>
 
     <h3>What you're driving</h3>
     <div class="form">${contextForm}
