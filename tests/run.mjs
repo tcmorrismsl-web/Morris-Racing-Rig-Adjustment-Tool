@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from 'node:assert/strict';
 import { FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from '../js/data.js';
-import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
 import { classFromPi, normalizeCar, upsertCar, diffCar, hasPart, PARTS } from '../js/garage.js';
 import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from '../js/cars.js';
@@ -61,6 +61,33 @@ const sharpR = forzaTune({ track: 'spa', cls: 'S', drivetrain: 'rwd', weather: '
 assert.ok(diffOf(easyR) < diffOf(sharpR), 'Forgiving should lock the diff less on power');
 const arbs = fuj.sections.find((s) => s.title === 'Anti-roll bars').rows.map((r) => Number(r.value));
 assert.ok(arbs[1] > arbs[0], 'FWD rear ARB should be stiffer than front');
+
+// ---------------- Laps, start time and compound ----------------
+for (const t of FORZA_TRACKS) {
+  assert.ok(t.miles > 0, `${t.id} has a lap length`);
+  for (const c of FORZA_CLASSES) {
+    const e = estimateRace(t, c.tier, 10);
+    assert.ok(e.lapMin > 0.5 && e.lapMin < 20, `${t.id} ${c.id} lap ${e.lapMin}`);
+  }
+  for (const compound of COMPOUNDS) for (const start of ['06:00', '13:00', '20:00']) for (const laps of [1, 5, 30]) for (const weather of ['dry', 'wet']) {
+    const r = forzaTune({ track: t.id, cls: 'A', drivetrain: 'rwd', weather, temp: 'mild', laps, start, compound: compound.id, tyreWear: true });
+    const rows = r.sections.flatMap((s) => s.rows);
+    assert.ok(rows.every((x) => x.value && !bad(x.value)) && r.notes.every((x) => !bad(x)), `${t.id} ${compound.id} ${laps}`);
+    n++;
+  }
+}
+assert.equal(START_TIMES.length, 24);
+const tyreRow = (r) => r.sections[0].rows[0];
+const fuj3 = forzaTune({ track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', laps: 3, start: '20:00', compound: 'medium', tyreWear: true });
+assert.equal(tyreRow(fuj3).label, 'Compound');
+assert.ok(fuj3.notes.some((x) => /3 laps is about \d+ minutes/.test(x)), fuj3.notes.join(' | '));
+const sprint = forzaTune({ track: 'limerock', cls: 'C', drivetrain: 'rwd', weather: 'dry', laps: 3, start: '13:00', compound: 'medium', tyreWear: true });
+assert.ok(/Soft is the better pick/.test(tyreRow(sprint).why), tyreRow(sprint).why);
+const rain = forzaTune({ track: 'spa', cls: 'A', drivetrain: 'rwd', weather: 'wet', laps: 5, start: '13:00', compound: 'soft', tyreWear: true });
+assert.ok(rain.notes.some((x) => x.startsWith('Slick tyres on a wet track')));
+const softP = parseFloat(forzaTune({ track: 'spa', cls: 'A', drivetrain: 'rwd', weather: 'dry', laps: 5, start: '13:00', compound: 'soft' }).sections[0].rows[1].value);
+const hardP = parseFloat(forzaTune({ track: 'spa', cls: 'A', drivetrain: 'rwd', weather: 'dry', laps: 5, start: '13:00', compound: 'hard' }).sections[0].rows[1].value);
+assert.ok(softP < hardP, 'Softs should start at lower pressure than hards');
 
 // ---------------- Current-value comparisons ----------------
 assert.equal(compareValue({ type: 'abs', target: 30, dp: 0 }, '30').text, 'Already set');

@@ -3,8 +3,8 @@
 // Absolute values use Forza's own slider scales; items Forza scales per car
 // (springs, ride height, aero, gearing) are given as changes from the car's default tune.
 
-import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvg4k0vm';
-import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvg4k0vm';
+import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvg5074w';
+import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvg5074w';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -53,6 +53,26 @@ export const DRIVETRAINS = [
   { id: 'awd', label: 'AWD' },
 ];
 
+export const COMPOUNDS = [
+  { id: 'soft', label: 'Soft' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'hard', label: 'Hard' },
+  { id: 'wet', label: 'Wet' },
+];
+
+// Race start times, on the hour.
+export const START_TIMES = Array.from({ length: 24 }, (_, h) => ({
+  id: `${String(h).padStart(2, '0')}:00`,
+  label: `${h % 12 || 12}:00 ${h < 12 ? 'AM' : 'PM'}`,
+}));
+
+// Rough race duration from laps: average speed by class tier, scaled by how fast the track is.
+export function estimateRace(track, tier, laps) {
+  const mph = [60, 75, 90, 105][tier] * { 1: 0.8, 2: 0.95, 3: 1.05, 4: 1.15 }[track.speed];
+  const lapMin = (track.miles / mph) * 60;
+  return { lapMin, minutes: Math.round(lapMin * laps) };
+}
+
 export function forzaTune(input) {
   const track = FORZA_TRACKS.find((t) => t.id === input.track) || FORZA_TRACKS[0];
   // A garage car, when chosen, overrides class, drivetrain and aero.
@@ -61,12 +81,17 @@ export function forzaTune(input) {
   const cls = FORZA_CLASSES.find((c) => c.id === (carCls || input.cls)) || FORZA_CLASSES[4];
   const dt = (car && car.drivetrain) || input.drivetrain || 'rwd';
   const wet = input.weather === 'wet';
-  const night = input.time === 'night';
+  const startHour = input.start ? Number(String(input.start).slice(0, 2)) : null;
+  const night = startHour !== null ? startHour >= 19 || startHour < 7 : input.time === 'night';
   // Temperature steps: -1 cool, 0 mild, +1 hot. Night pulls it one step cooler.
   let temp = { cool: -1, mild: 0, hot: 1 }[input.temp || 'mild'];
   if (night) temp = Math.max(-1, temp - 1);
-  const length = input.length || 'medium'; // sprint | medium | long
   const wear = !!input.tyreWear;
+  const laps = Math.max(0, Math.round(Number(input.laps) || 0));
+  const est = laps ? estimateRace(track, cls.tier, laps) : null;
+  // sprint | medium | long: from the lap count when given, otherwise picked directly.
+  const length = est ? (est.minutes < 15 ? 'sprint' : est.minutes <= 35 ? 'medium' : 'long') : input.length || 'medium';
+  const compound = COMPOUNDS.some((c) => c.id === input.compound) ? input.compound : 'medium';
   const aero = car ? hasPart(car, 'aero') : (input.aero ?? cls.tier >= 2);
   const tier = cls.tier; // 0..3
   const long = length === 'long';
@@ -84,9 +109,26 @@ export function forzaTune(input) {
   if (dt === 'fwd') pf -= 0.5; // driven + steering fronts run hotter
   if (dt === 'rwd') pr -= 0.5;
   if (long && wear) { pf += 0.5; pr += 0.5; }
+  if (compound === 'soft') { pf -= 0.5; pr -= 0.5; } // softs heat up fast
+  if (compound === 'hard' || compound === 'wet') { pf += 0.5; pr += 0.5; } // slow to warm
+  // Which compound suits this race.
+  const mins = est ? est.minutes : { sprint: 10, medium: 25, long: 45 }[length];
+  const best = wet ? 'wet' : !wear || mins <= 15 ? 'soft' : mins <= 35 ? 'medium' : 'hard';
+  const cname = (id) => COMPOUNDS.find((c) => c.id === id).label;
+  const bestWhy = {
+    wet: 'The only tyre with real grip on a wet track.',
+    soft: !wear ? 'Tyre wear is off, so the grippiest tyre lasts the whole race.' : 'Short race, so the extra grip is worth more than how long they last.',
+    medium: 'Grippy enough, and holds up for a race this long.',
+    hard: 'Lasts a long race without fading. Medium is quicker if you plan to pit.',
+  }[best];
+  const compoundRow = {
+    label: 'Compound', value: cname(compound),
+    why: compound === best ? `Good choice. ${bestWhy}` : `${cname(best)} is the better pick${est ? ` for about ${est.minutes} minutes` : ''}. ${bestWhy} Pressures below are set for ${cname(compound)}.`,
+  };
   sections.push({
     title: 'Tyres',
     rows: [
+      compoundRow,
       { key: 'pf', cmp: abs(pf, 1, ' psi'), label: 'Front pressure (cold)', value: psi(pf), why: 'Aim for about 30–32 psi hot. Check in telemetry after 2–3 corners.' },
       { key: 'pr', cmp: abs(pr, 1, ' psi'), label: 'Rear pressure (cold)', value: psi(pr), why: temp < 0 ? 'Cool track, so tyres build heat slowly. Started higher to reach the hot target.' : temp > 0 ? 'Hot track, so pressures climb fast. Started lower.' : 'Mild conditions. Adjust 0.5 psi at a time.' },
     ],
@@ -271,6 +313,14 @@ export function forzaTune(input) {
 
   // ---------------- Notes ----------------
   notes.unshift(track.note);
+  if (est) notes.splice(1, 0, `${laps} lap${laps === 1 ? '' : 's'} is about ${est.minutes} minutes (around ${est.lapMin < 1 ? 'under a minute' : `${est.lapMin.toFixed(1)} min`} a lap), so this is set up as a ${length === 'sprint' ? 'short sprint' : length === 'medium' ? 'medium-length race' : 'long race'}. It's an estimate; your real lap time will vary.`);
+  if (startHour !== null && est && !night) {
+    const endHour = startHour + est.minutes / 60;
+    if (endHour >= 19) notes.push('The race runs into the evening, so the track cools and grip rises as it goes on. Expect the car to feel better late on.');
+  }
+  if (compound === 'wet' && !wet) notes.push('Wet tyres on a dry track overheat and wear out fast. Only use them if rain is coming.');
+  if (compound !== 'wet' && wet) notes.push('Slick tyres on a wet track have very little grip. Use Wet tyres if the race allows it.');
+  if (compound === 'soft' && wear && mins > 15) notes.push('Softs will fade in the second half. Brake a little earlier as they go off.');
   notes.splice(1, 0, easy
     ? 'Forgiving: built to work with Normal steering, stability control on and Sport traction control. Stable on the brakes and on the power, for clean laps. Switch to Sharp once you want more speed.'
     : 'Sharp: pointier and faster, for driving with Simulation steering and stability control off. Less forgiving of mistakes.');
