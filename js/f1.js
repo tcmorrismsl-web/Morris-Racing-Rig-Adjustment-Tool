@@ -1,7 +1,7 @@
 // F1 25 setup recommendations for the 2025 cars and the 2026 Season Pack cars.
 // Values are full setup-screen numbers, clamped to the game's ranges.
 
-import { F1_TRACKS, F1_RANGES as R } from './data.js?v=mvg5074w';
+import { F1_TRACKS, F1_RANGES as R } from './data.js?v=mvg5buzz';
 
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const roundTo = (v, step) => Math.round(v / step) * step;
@@ -12,11 +12,36 @@ export const F1_STYLES = [
   { id: 'aggressive', label: 'Aggressive', hint: 'Sharp and fast, less margin for error.' },
 ];
 
+export const F1_COMPOUNDS = [
+  { id: 'soft', label: 'Soft' },
+  { id: 'medium', label: 'Medium' },
+  { id: 'hard', label: 'Hard' },
+  { id: 'inter', label: 'Inter' },
+  { id: 'wet', label: 'Wet' },
+];
+
+// F1 25's race distances, as a share of the full Grand Prix.
+export const F1_DISTANCES = [
+  { id: 'laps5', label: '5 laps', laps: () => 5 },
+  { id: '25', label: '25%', pct: 0.25 },
+  { id: '35', label: '35%', pct: 0.35 },
+  { id: '50', label: '50%', pct: 0.5 },
+  { id: '100', label: '100%', pct: 1 },
+];
+export const lapsFor = (track, pct) => Math.max(1, Math.round(track.laps * pct));
+
 export function f1Setup(input) {
   const era = Number(input.era) === 2026 ? 2026 : 2025;
   const track = F1_TRACKS.find((t) => t.id === input.track) || F1_TRACKS[0];
   const quali = input.session === 'quali';
-  const wet = input.weather === 'wet';
+  const compound = F1_COMPOUNDS.some((c) => c.id === input.compound) ? input.compound : quali ? 'soft' : 'medium';
+  // Inters or full wets mean a wet setup, whatever the weather setting says.
+  const wet = input.weather === 'wet' || compound === 'inter' || compound === 'wet';
+  const laps = quali ? 0 : Math.max(0, Math.round(Number(input.laps) || 0));
+  const share = laps ? laps / track.laps : null; // share of a full Grand Prix
+  // short: tyre life barely matters. long: protect the tyres.
+  const runLength = quali ? 'quali' : share === null ? 'medium' : share <= 0.2 ? 'short' : share <= 0.5 ? 'medium' : 'long';
+  const short = runLength === 'short', longRun = runLength === 'long';
   const style = input.style || 'balanced';
   const stable = style === 'stable', aggressive = style === 'aggressive';
   const v = {}, why = {};
@@ -41,6 +66,7 @@ export function f1Setup(input) {
   on -= track.traction * 2.5;
   if (wet) on -= 15;
   if (era === 2026) on -= 5;
+  if (longRun) on -= 5; // less wheelspin, kinder to the rears over a long race
   let off = aggressive ? 30 : stable ? 55 : 45;
   if (wet) off += 10;
   v.diffOn = clamp(roundTo(on, 5), R.diffOn);
@@ -49,12 +75,12 @@ export function f1Setup(input) {
   why.diffOff = 'Higher is more stable into corners; lower helps rotation.';
 
   // ---------------- Geometry ----------------
-  const save = !quali || stable;
-  v.frontCamber = wet ? -3.0 : save ? -3.2 : -3.5;
-  v.rearCamber = wet ? -1.5 : save ? -1.7 : -2.0;
+  const save = (!quali && !short) || stable;
+  v.frontCamber = wet ? -3.0 : save ? (longRun ? -3.1 : -3.2) : -3.5;
+  v.rearCamber = wet ? -1.5 : save ? (longRun ? -1.6 : -1.7) : -2.0;
   v.frontToe = save ? 0.05 : 0.0;
   v.rearToe = (stable || wet) ? 0.2 : 0.1;
-  why.frontCamber = save ? 'Slightly less than maximum to save tyre wear over a race.' : 'Maximum for one-lap grip.';
+  why.frontCamber = short && !stable ? 'Short race, so tyre wear barely matters: near-maximum for grip.' : save ? `Slightly less than maximum to save tyre wear${longRun ? ' over a long race' : ' over a race'}.` : 'Maximum for one-lap grip.';
   why.rearToe = v.rearToe > 0.1 ? 'More toe-in for rear stability.' : 'Minimum for less drag.';
 
   // ---------------- Suspension ----------------
@@ -98,12 +124,38 @@ export function f1Setup(input) {
   // ---------------- Tyres ----------------
   let tf = quali && !stable ? 29.5 : stable ? 25.5 : 26.5;
   let tr = quali && !stable ? 26.5 : stable ? 23.5 : 24.0;
+  if (short && !stable) { tf += 1.5; tr += 1.0; } // a few laps: closer to a quali setup
+  if (longRun) { tf -= 0.3; tr -= 0.4; } // cooler tyres last longer
+  if (compound === 'soft' && !quali) { tf -= 0.2; tr -= 0.2; } // softs run hot
+  if (compound === 'hard') { tf += 0.3; tr += 0.3; } // hards are slow to warm
   if (wet) { tf = 25.0; tr = 23.0; }
   if (era === 2026) tr -= 2.0;
   v.frontTyre = clamp(roundTo(tf, 0.1), R.frontTyre);
   v.rearTyre = clamp(roundTo(tr, 0.1), R.rearTyre);
-  why.frontTyre = quali ? 'High pressure for a quick lap.' : 'Lower to protect the tyres over a stint.';
+  why.frontTyre = quali ? 'High pressure for a quick lap.' : short ? 'A few laps only, so higher for response.' : longRun ? 'Lower to keep temperatures down over a long race.' : 'Lower to protect the tyres over a stint.';
   why.rearTyre = era === 2026 ? 'The narrower 2026 rears like lower pressure for traction.' : 'Keep rear surface temperatures near 90–100°C.';
+
+  // ---------------- Tyre choice and strategy ----------------
+  const cname = (id) => F1_COMPOUNDS.find((c) => c.id === id).label;
+  let best, plan;
+  if (input.weather === 'wet') {
+    best = 'inter';
+    plan = 'Inters for a damp track or light rain; full Wets only when there is standing water. Switch to slicks once a dry line appears.';
+  } else if (quali) {
+    best = 'soft'; plan = 'Softs for the fastest single lap.';
+  } else if (share === null || share <= 0.2) {
+    best = 'soft'; plan = 'Softs all the way. No stop needed.';
+  } else if (share <= 0.4) {
+    best = 'medium'; plan = 'Start on Mediums and pit once for Softs near the end, or Softs then Mediums if you want track position early.';
+  } else {
+    best = 'medium';
+    plan = track.traction === 2 || track.kerbs === 2 ? 'Mediums then Hards, one stop. If the rears are struggling, a two-stop on Mediums is safer.' : 'Mediums then Hards, one stop around the middle of the race.';
+  }
+  const tyreAdvice = { compound: cname(compound), best: cname(best), ok: compound === best, plan };
+  if (laps) notes.unshift(`${laps} lap${laps === 1 ? '' : 's'} is ${Math.round(share * 100)}% of the full ${track.laps}-lap race, so this is set up as a ${runLength === 'short' ? 'short race (grip over tyre life)' : runLength === 'long' ? 'long race (tyre life first)' : 'medium-length race'}.`);
+  if (input.weather !== 'wet' && (compound === 'inter' || compound === 'wet')) notes.push(`${cname(compound)} tyres on a dry track overheat and wear fast, so this is set up for a wet track. Change Weather to Wet if it's raining, or pick a dry tyre.`);
+  if (input.weather === 'wet' && !['inter', 'wet'].includes(compound)) notes.push('Slicks on a wet track have very little grip. Start on Inters unless the track is drying fast.');
+  if (!quali && share !== null && share > 0.2 && input.weather !== 'wet') notes.push('If the mandatory pit stop is on, you must use two different dry compounds in the race.');
 
   // ---------------- Notes ----------------
   if (era === 2026) {
@@ -117,7 +169,7 @@ export function f1Setup(input) {
   if (wet) notes.push('Wet: more wing, softer suspension and less diff lock. Short-shift out of slow corners.');
   if (!quali) notes.push('Race setup trades a little one-lap pace for tyre life and consistency.');
 
-  return { era, track, v, why, notes };
+  return { era, track, v, why, notes, tyreAdvice, laps, runLength };
 }
 
 export const F1_ROWS = [

@@ -1,22 +1,22 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg5074w';
-import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg5074w';
-import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg5074w';
-import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg5074w';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg5074w';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg5074w';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg5074w';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg5buzz';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg5buzz';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg5buzz';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg5buzz';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg5buzz';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg5buzz';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg5buzz';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 19, 11:42 PM'; // set by npm run stamp
+const APP_VERSION = 'Oct 19, 11:51 PM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
   tab: 'wheel',
   wheelSetFor: null,
   forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', laps: 3, start: '20:00', compound: 'medium', tyreWear: true, fuel: false, aero: true, compare: false, feel: 'forgiving' },
-  f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced' },
+  f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced', dist: '25', laps: '', compound: 'medium' },
   saved: [],
   current: {}, // values in the game now, per garage car ('_any' when no car is picked)
   links: { forzaCars: {}, forzaTracks: {} }, // Forza car/track numbers from telemetry, linked to your garage and track list
@@ -227,11 +227,25 @@ function renderForza() {
 // ---------------------------------------------------------------------------
 // Setup tab: F1 25
 // ---------------------------------------------------------------------------
+// F1 inputs with laps worked out from the chosen race distance.
+function f1Input() {
+  const f = state.f1;
+  const tr = F1_TRACKS.find((t) => t.id === f.track) || F1_TRACKS[0];
+  const d = F1_DISTANCES.find((x) => x.id === f.dist);
+  const laps = d ? (d.laps ? d.laps() : lapsFor(tr, d.pct)) : Number(f.laps) || 0;
+  return { ...f, laps };
+}
+
 function renderF1() {
   const f = state.f1;
   const tracks = F1_TRACKS.filter((t) => !t.only || t.only === Number(f.era));
   if (!tracks.find((t) => t.id === f.track)) f.track = tracks[0].id;
-  const res = f1Setup(f);
+  const tr = tracks.find((t) => t.id === f.track);
+  const d = F1_DISTANCES.find((x) => x.id === f.dist);
+  const { laps } = f1Input();
+  const race = f.session === 'race';
+  const res = f1Setup(f1Input());
+  const ta = res.tyreAdvice;
   view.innerHTML = `
     <h2>F1 25 setup</h2>
     <p class="lede">Full setup-screen values. Enter them in Car Setup before the session.</p>
@@ -239,10 +253,16 @@ function renderF1() {
       ${field('Cars', seg('era', [{ id: 2025, label: '2025 cars' }, { id: 2026, label: '2026 Season Pack' }], f.era), true)}
       ${field('Track', `<select data-field="track">${tracks.map((t) => `<option value="${t.id}"${t.id === f.track ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`, true)}
       ${field('Session', seg('session', [{ id: 'quali', label: 'Quali / Time Trial' }, { id: 'race', label: 'Race' }], f.session), true)}
+      ${race ? `${field('Race distance', seg('dist', F1_DISTANCES, d ? d.id : ''), true)}
+      ${field('Laps', `<input type="number" data-field="laps" value="${laps || ''}" min="1" max="${tr.laps}" step="1" inputmode="numeric">`)}
+      <p class="small race-est">${laps ? `${laps} of ${tr.laps} laps (${Math.round((laps / tr.laps) * 100)}%)` : 'Pick a distance or enter laps.'}</p>` : ''}
+      ${field(race ? 'Starting tyre' : 'Tyres', seg('compound', F1_COMPOUNDS, f.compound), true)}
       ${field('Weather', seg('weather', [{ id: 'dry', label: 'Dry' }, { id: 'wet', label: 'Wet' }], f.weather))}
       ${field('Feel', seg('style', F1_STYLES, f.style))}
       <p class="small wide">${esc(F1_STYLES.find((s) => s.id === f.style).hint)}</p>
     </div>
+    <h3>Tyre strategy</h3>
+    <div class="rows">${row(race ? 'Starting tyre' : 'Tyre', ta.compound, ta.ok ? `Good choice. ${ta.plan}` : `${ta.best} is the better choice. ${ta.plan}`)}</div>
     ${F1_ROWS.map((g) => `
       <h3>${esc(g.group)}</h3>
       <div class="rows">${g.items.map(([k, label, unit = '', dp = 0]) => {
@@ -310,13 +330,13 @@ function saveCurrent() {
       rows: res.sections.flatMap((s) => s.rows.map((r) => [`${s.title}: ${r.label}`, r.value])),
     });
   } else {
-    const res = f1Setup(state.f1);
+    const res = f1Setup(f1Input());
     const def = `${res.track.name} ${state.f1.session === 'quali' ? 'quali' : 'race'}`;
     const name = prompt('Name this setup', def);
     if (name === null) return;
     state.saved.unshift({
       id, game: 'f1', name: name.trim() || def,
-      sub: `${res.era} cars, ${res.track.name}, ${state.f1.session}, ${state.f1.weather}`,
+      sub: `${res.era} cars, ${res.track.name}, ${state.f1.session}${res.laps ? `, ${res.laps} laps` : ''}, ${state.f1.compound} tyres, ${state.f1.weather}`,
       inputs: { ...state.f1 },
       rows: F1_ROWS.flatMap((g) => g.items.map(([k, label, unit = '', dp = 0]) => [label, `${dp ? Number(res.v[k]).toFixed(dp) : res.v[k]}${unit}`])),
     });
@@ -771,6 +791,7 @@ view.addEventListener('change', (e) => {
   const target = state.game === 'forza' ? state.forza : state.f1;
   if (el.dataset.field === 'carId' && el.value === '__add') { editingId = 'new'; state.tab = 'garage'; persist(); render(); window.scrollTo({ top: 0 }); return; }
   if (el.dataset.field === 'carId') { selectCar(el.value); persist(); render(); return; }
+  if (el.dataset.field === 'laps' && state.game === 'f1') state.f1.dist = 'custom';
   if (el.dataset.field) { target[el.dataset.field] = el.value; persist(); render(); }
   if (el.dataset.check) { target[el.dataset.check] = el.checked; persist(); render(); }
 });

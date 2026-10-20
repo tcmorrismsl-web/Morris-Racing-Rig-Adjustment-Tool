@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from '../js/data.js';
 import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
-import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
 import { classFromPi, normalizeCar, upsertCar, diffCar, hasPart, PARTS } from '../js/garage.js';
 import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from '../js/cars.js';
 
@@ -47,6 +47,24 @@ for (const era of [2025, 2026]) for (const t of F1_TRACKS) for (const session of
   }
 
 for (const i of F1_ISSUES) assert.ok(f1Fix(i.id).length >= 2, `F1 fix ${i.id}`);
+
+// F1 laps and compounds
+for (const era of [2025, 2026]) for (const t of F1_TRACKS) {
+  assert.ok(t.laps >= 40 && t.laps <= 80, `${t.id} laps`);
+  for (const d of F1_DISTANCES) for (const c of F1_COMPOUNDS) for (const weather of ['dry', 'wet']) {
+    const laps = d.laps ? d.laps() : lapsFor(t, d.pct);
+    const r = f1Setup({ era, track: t.id, session: 'race', weather, style: 'balanced', laps, compound: c.id });
+    for (const g of F1_ROWS) for (const [k] of g.items) assert.ok(r.v[k] >= F1_RANGES[k][0] && r.v[k] <= F1_RANGES[k][1], `F1 ${t.id} ${d.id} ${c.id} ${k}=${r.v[k]}`);
+    assert.ok(r.tyreAdvice.plan && r.notes.every((x) => !bad(x)));
+    n++;
+  }
+}
+const f1Short = f1Setup({ era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced', laps: 5, compound: 'soft' });
+const f1Full = f1Setup({ era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced', laps: 58, compound: 'medium' });
+assert.equal(f1Short.runLength, 'short'); assert.equal(f1Full.runLength, 'long');
+assert.ok(f1Short.v.frontTyre > f1Full.v.frontTyre, 'Short races run higher pressure');
+assert.ok(f1Short.v.frontCamber < f1Full.v.frontCamber, 'Short races run more camber');
+assert.equal(f1Setup({ era: 2025, track: 'monaco', session: 'race', weather: 'dry', laps: 20, compound: 'inter' }).v.frontTyre, 25.0, 'Inters use the wet setup');
 
 // Spot checks that the logic points the right way.
 const dry = f1Setup({ era: 2025, track: 'monaco', session: 'race', weather: 'dry', style: 'balanced' });
