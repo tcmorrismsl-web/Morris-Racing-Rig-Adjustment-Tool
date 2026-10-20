@@ -111,6 +111,12 @@ h3 {
 .row .v { font: 600 22px/1.15 var(--cond); text-align: right; color: var(--text); }
 .row .v.rel { font-size: 18px; color: var(--led-amber); max-width: 52vw; }
 .row .why { grid-column: 1 / -1; font-size: 14px; color: var(--muted); }
+.row .now { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin-top: 6px; }
+.row .now input { width: 92px; padding: 7px 9px; }
+.row .cmp { grid-column: 2; align-self: center; text-align: right; margin-top: 6px; font: 600 16px/1.2 var(--cond); color: var(--muted); max-width: 46vw; }
+.row .cmp.chg { color: var(--gold); }
+.row .cmp.ok { color: var(--led-green); }
+.now-help { margin: 10px 2px 0; }
 .row .range { font-size: 13px; color: var(--muted); text-align: right; grid-column: 2; }
 .hint { font-size: 13px; color: var(--muted); margin: 6px 2px 0; }
 

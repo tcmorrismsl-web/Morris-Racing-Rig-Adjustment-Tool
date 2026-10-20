@@ -1,5 +1,5 @@
 import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js';
-import { forzaTune, forzaFix, FORZA_ISSUES, DRIVETRAINS } from './forza.js';
+import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js';
 import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js';
 import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js';
@@ -13,9 +13,10 @@ const defaults = {
   game: 'forza',
   tab: 'wheel',
   wheelSetFor: null,
-  forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', tyreWear: true, fuel: false, aero: true },
+  forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', tyreWear: true, fuel: false, aero: true, compare: false },
   f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced' },
   saved: [],
+  current: {}, // values in the game now, per garage car ('_any' when no car is picked)
   links: { forzaCars: {}, forzaTracks: {} }, // Forza car/track numbers from telemetry, linked to your garage and track list
   dataLaps: '3',
   garage: [normalizeCar({
@@ -32,6 +33,7 @@ function load(raw) {
       forza: { ...defaults.forza, ...s.forza }, f1: { ...defaults.f1, ...s.f1 },
       garage: Array.isArray(s.garage) ? s.garage.map(normalizeCar) : structuredClone(defaults.garage),
       links: { forzaCars: { ...s.links?.forzaCars }, forzaTracks: { ...s.links?.forzaTracks } },
+      current: s.current && typeof s.current === 'object' ? s.current : {},
     };
   } catch { return structuredClone(defaults); }
 }
@@ -149,17 +151,40 @@ function renderWheel() {
 // ---------------------------------------------------------------------------
 // Setup tab: Forza
 // ---------------------------------------------------------------------------
+const nowKey = () => state.forza.carId || '_any';
+let lastTune = null; // the tune on screen, for live comparisons while typing
+
+function cmpHtml(c) {
+  return c ? esc(c.text) : '';
+}
+
+function tuneRow(r) {
+  if (!state.forza.compare || !r.cmp) return row(r.label, r.value, r.why, { rel: r.rel });
+  const cur = (state.current[nowKey()] || {})[r.key];
+  const c = compareValue(r.cmp, cur);
+  return `
+  <div class="row has-now">
+    <span class="k">${esc(r.label)}</span>
+    <span class="v${r.rel ? ' rel' : ''}">${esc(r.value)}</span>
+    <label class="now"><span>Now</span><input type="number" step="any" data-now="${esc(r.key)}" value="${esc(cur ?? '')}" aria-label="${esc(r.label)} in the game now"></label>
+    <span class="cmp${c ? (c.ok ? ' ok' : ' chg') : ''}" data-cmp="${esc(r.key)}">${cmpHtml(c)}</span>
+    ${r.why ? `<span class="why">${esc(r.why)}</span>` : ''}
+  </div>`;
+}
+
 function renderForza() {
   const f = state.forza;
   const car = currentCar();
   const res = forzaTune({ ...f, car });
+  lastTune = res;
+  const hasNow = Object.keys(state.current[nowKey()] || {}).length > 0;
   const cls = FORZA_CLASSES.map((c) => ({ id: c.id, label: c.label }));
   const carPI = car && classFromPi(car.pi);
   const carOptions = `<option value="">Any car (set class below)</option>${state.garage.map((c) =>
     `<option value="${esc(c.id)}"${c.id === f.carId ? ' selected' : ''}>${esc(c.name)}${classFromPi(c.pi) ? ` (${classFromPi(c.pi)} ${c.pi})` : ''}</option>`).join('')}`;
   view.innerHTML = `
     <h2>Forza tune</h2>
-    <p class="lede">Starting values for your car on this track. Load the car's default tune, then apply these.</p>
+    <p class="lede">Starting values for your car on this track. Load the car's default tune, then apply these. Turn on "Enter my current values" to see exactly what to change.</p>
     <div class="form">
       ${field('Car', `<select data-field="carId">${carOptions}</select>`, true)}
       ${car ? `<p class="small wide car-line">${carPI ? `${esc(carPI)} class, PI ${esc(car.pi)}` : 'No PI yet'}, ${dtLabel(res.drivetrain)}${car.hp ? `, ${esc(car.hp)} hp` : ''}${car.weight ? `, ${esc(car.weight)} lb` : ''}. <button type="button" class="link" data-action="edit-car" data-id="${esc(car.id)}">Update in Garage</button></p>` : ''}
@@ -174,12 +199,14 @@ function renderForza() {
         <label class="toggle">Tyre wear on <input type="checkbox" data-check="tyreWear"${f.tyreWear ? ' checked' : ''}></label>
         <label class="toggle">Fuel use on <input type="checkbox" data-check="fuel"${f.fuel ? ' checked' : ''}></label>
         ${car ? '' : `<label class="toggle">Car has adjustable aero <input type="checkbox" data-check="aero"${f.aero ? ' checked' : ''}></label>`}
+        <label class="toggle">Enter my current values <input type="checkbox" data-check="compare"${f.compare ? ' checked' : ''}></label>
       </div>
     </div>
+    ${f.compare ? `<p class="small now-help">Type in what the car has now and each setting shows what to change it to. For springs, final drive and suspension geometry, enter the numbers from the car's default tune, because those are changes from default. Values are saved ${car ? `for ${esc(car.name)}` : 'on this device'}.${hasNow ? ' <button type="button" class="link" data-action="clear-now">Clear my values</button>' : ''}</p>` : ''}
     ${res.sections.map((s) => `
       <h3>${esc(s.title)}</h3>
       ${s.locked ? `<p class="locked-note">${esc(s.locked)}</p>` : ''}
-      <div class="rows${s.locked ? ' locked' : ''}">${s.rows.map((r) => row(r.label, r.value, r.why, { rel: r.rel })).join('')}</div>
+      <div class="rows${s.locked ? ' locked' : ''}">${s.rows.map(tuneRow).join('')}</div>
       ${s.hint ? `<p class="hint">${esc(s.hint)}</p>` : ''}`).join('')}
     <p class="hint">Amber values are changes from the car's default tune, because Forza scales those sliders per car.</p>
     <ul class="notes">${res.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
@@ -652,6 +679,11 @@ view.addEventListener('click', (e) => {
   }
   if (a === 'wheel-done') { state.wheelSetFor = state.game; persist(); render(); toast(`Wheel set for ${gameName(state.game)}`); window.scrollTo({ top: 0 }); }
   if (a === 'save') saveCurrent();
+  if (a === 'clear-now') {
+    if (!confirm('Clear the values you entered?')) return;
+    delete state.current[nowKey()];
+    persist(); render(); toast('Cleared');
+  }
   if (a === 'delete') {
     if (!confirm('Delete this saved setup?')) return;
     state.saved = state.saved.filter((s) => s.id !== act.dataset.id);
@@ -682,13 +714,28 @@ view.addEventListener('change', (e) => {
   if (el.matches('[data-import]')) { if (el.files[0]) importGarage(el.files[0]); el.value = ''; return; }
   if (el.closest('#car-form')) return;
   if (el.dataset.ctx) { setContext(el.dataset.ctx, el.value); return; }
+  if (el.dataset.now) return;
   const target = state.game === 'forza' ? state.forza : state.f1;
   if (el.dataset.field === 'carId') { selectCar(el.value); persist(); render(); return; }
   if (el.dataset.field) { target[el.dataset.field] = el.value; persist(); render(); }
   if (el.dataset.check) { target[el.dataset.check] = el.checked; persist(); render(); }
 });
 
+let nowSave;
 view.addEventListener('input', (e) => {
+  const now = e.target.dataset.now;
+  if (now) {
+    const k = nowKey();
+    const vals = { ...state.current[k] };
+    if (e.target.value === '') delete vals[now]; else vals[now] = e.target.value;
+    state.current[k] = vals;
+    const r = lastTune?.sections.flatMap((s) => s.rows).find((x) => x.key === now);
+    const c = r && compareValue(r.cmp, vals[now]);
+    const out = view.querySelector(`[data-cmp="${now}"]`);
+    if (out) { out.innerHTML = cmpHtml(c); out.className = `cmp${c ? (c.ok ? ' ok' : ' chg') : ''}`; }
+    clearTimeout(nowSave); nowSave = setTimeout(persist, 400);
+    return;
+  }
   if (e.target.matches('#car-form [name=pi]')) {
     const cl = classFromPi(e.target.value);
     $('#car-form .pi-class').textContent = cl ? `${cl} class` : '';

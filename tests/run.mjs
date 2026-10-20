@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from 'node:assert/strict';
 import { FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from '../js/data.js';
-import { forzaTune, forzaFix, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
+import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
 import { classFromPi, normalizeCar, upsertCar, diffCar, hasPart, PARTS } from '../js/garage.js';
 
@@ -20,7 +20,14 @@ for (const t of FORZA_TRACKS) for (const c of FORZA_CLASSES) for (const d of DRI
         if (/pressure \(cold\)/.test(row.label)) assert.ok(num >= 24 && num <= 34, `pressure ${num}`);
         if (s.title === 'Anti-roll bars') assert.ok(num >= 1 && num <= 65, `arb ${num}`);
         if (/camber/.test(row.label)) assert.ok(num >= -3 && num <= 0, `camber ${num}`);
+        if (row.cmp) {
+          assert.ok(row.key, `row ${row.label} has cmp but no key`);
+          const c = compareValue(row.cmp, '10');
+          assert.ok(c && !bad(c.text), `compare ${s.title}/${row.label}: ${c && c.text}`);
+        }
       }
+      const keys = r.sections.flatMap((s) => s.rows.map((x) => x.key)).filter(Boolean);
+      assert.equal(new Set(keys).size, keys.length, 'duplicate row keys');
       assert.equal(r.sections.some((s) => s.title === 'Aero'), aero);
       n++;
     }
@@ -49,6 +56,19 @@ assert.ok(wet.v.diffOn < dry.v.diffOn, 'Wet should lower on-throttle diff');
 const fuj = forzaTune({ track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'long', tyreWear: true, aero: true });
 const arbs = fuj.sections.find((s) => s.title === 'Anti-roll bars').rows.map((r) => Number(r.value));
 assert.ok(arbs[1] > arbs[0], 'FWD rear ARB should be stiffer than front');
+
+// ---------------- Current-value comparisons ----------------
+assert.equal(compareValue({ type: 'abs', target: 30, dp: 0 }, '30').text, 'Already set');
+assert.equal(compareValue({ type: 'abs', target: 30, dp: 0 }, '22').text, 'Change to 30 (+8)');
+assert.equal(compareValue({ type: 'abs', target: -2.0, dp: 1, unit: '°' }, '-1.5').text, 'Change to -2.0° (-0.5)');
+assert.equal(compareValue({ type: 'abs', target: 28.5, dp: 1, unit: ' psi' }, '2.0').text, 'Change to 1.97 bar (-0.03)');
+assert.equal(compareValue({ type: 'pct', pct: -5 }, '800').text, 'Change to 760');
+assert.equal(compareValue({ type: 'gear', clicks: [-4, -2] }, '3.50').text, 'Change to about 3.46–3.48');
+assert.equal(compareValue({ type: 'clicks', n: 0 }, '0').ok, true);
+assert.equal(compareValue({ type: 'abs', target: 1, dp: 0 }, ''), null);
+assert.equal(compareValue({ type: 'abs', target: 1, dp: 0 }, 'abc'), null);
+const geo = forzaTune({ track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'wet', time: 'day', temp: 'mild', length: 'medium' });
+assert.ok(geo.sections.some((s) => s.title === 'Suspension geometry'));
 
 // ---------------- Garage ----------------
 assert.equal(classFromPi(300), 'E'); assert.equal(classFromPi(301), 'D'); assert.equal(classFromPi(600), 'B');
