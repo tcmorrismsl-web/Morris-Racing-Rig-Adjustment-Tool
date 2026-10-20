@@ -1,13 +1,14 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js';
-import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js';
-import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg323ds';
+import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg323ds';
+import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg323ds';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg323ds';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg323ds';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg323ds';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
+const APP_VERSION = 'Oct 19, 10:47 PM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
@@ -148,7 +149,8 @@ function renderWheel() {
       <summary>How to use Pit House, then go back to the Xbox</summary>
       <ol>${APP_GUIDE.steps.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
       <p class="small">A USB switch box can save swapping cables between the Xbox and laptop, but plug straight into the laptop for firmware updates. MOZA advises against hubs, which can cause the power dips that interrupt updates.</p>
-    </details>`;
+    </details>
+    <p class="hint version">App version ${esc(APP_VERSION)}</p>`;
 }
 
 // ---------------------------------------------------------------------------

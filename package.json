@@ -7,7 +7,8 @@
     "test": "node tests/run.mjs && node tests/telemetry.mjs",
     "bridge": "node bridge/bridge.js",
     "simulate": "node tests/sim.cjs",
-    "build:bridge": "npx --yes @yao-pkg/pkg@6 bridge/package.json --targets node22-win-x64 --no-bytecode --public-packages \"*\" --public --output dist/MorrisRacingBridge.exe",
-    "start": "npx --yes serve ."
+    "build:bridge": "node scripts/stamp.mjs && npx --yes @yao-pkg/pkg@6 bridge/package.json --targets node22-win-x64 --no-bytecode --public-packages \"*\" --public --output dist/MorrisRacingBridge.exe",
+    "start": "npx --yes serve .",
+    "stamp": "node scripts/stamp.mjs"
   }
 }

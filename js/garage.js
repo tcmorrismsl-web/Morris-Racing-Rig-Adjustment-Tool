@@ -1,6 +1,6 @@
 // Forza Motorsport garage: the cars you own, their current stats and upgrade history.
 
-import { FORZA_CLASSES } from './data.js';
+import { FORZA_CLASSES } from './data.js?v=mvg323ds';
 
 // Stat bars shown on a car's page in Forza Motorsport (0.0–10.0).
 export const STATS = [
