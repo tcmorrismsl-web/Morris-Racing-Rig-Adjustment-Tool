@@ -22,6 +22,7 @@ export const WHEEL_PROFILES = {
     game: {
       where: 'Settings, then Advanced Wheel',
       items: [
+        { label: 'Steering wheel rotation', value: 'Same as the MOZA steering angle', why: 'This must match the base exactly, or the car turns far less (or more) than the wheel. Set both to 2000° if the slider allows. If it tops out lower, set the MOZA steering angle to that same number instead. Then calibrate.' },
         { label: 'Vibration scale', value: '50' },
         { label: 'Force feedback scale', value: '100', why: 'Around 100 suits the R3 and R5. Lower it if the wheel feels flat at the limit (clipping).' },
         { label: 'Steering self alignment', value: '70' },
@@ -33,7 +34,7 @@ export const WHEEL_PROFILES = {
         { label: 'Steering linearity', value: '50', why: '50 is a linear mapping, which Turn 10 recommends for wheels.' },
         { label: 'Use gamepad steering filters', value: 'Off' },
       ],
-      after: 'Run the in-game wheel calibration once after changing the steering angle. Each car\'s tuning menu also has its own FFB scale that is not saved with the tune.',
+      after: 'Check the game\'s steering wheel rotation matches the MOZA steering angle, then run the in-game wheel calibration. Do this again any time you change either one. Each car\'s tuning menu also has its own FFB scale that is not saved with the tune.',
     },
   },
   f1: {
