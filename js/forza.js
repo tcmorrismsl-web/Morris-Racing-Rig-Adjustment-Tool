@@ -296,11 +296,13 @@ export function forzaFix(issue, drivetrain = 'rwd') {
   const fwd = drivetrain === 'fwd', awd = drivetrain === 'awd';
   const F = {
     'us-entry': [
+      'First check Settings, Driving Assists: Steering on Simulation and Stability control Off. Normal steering and stability control both add understeer on a wheel.',
       'Soften the front anti-roll bar by 2–3.',
       'Move brake balance 1% toward the rear.',
       fwd ? 'Add front toe-out: 0.1° more.' : 'Lower deceleration diff lock by 5%.',
     ],
     'us-mid': [
+      'First check Settings, Driving Assists: Steering on Simulation and Stability control Off. Normal steering and stability control both add understeer on a wheel.',
       'Soften the front anti-roll bar by 2–3, or stiffen the rear by 2–3.',
       'Add 0.2° more negative front camber.',
       'If the car has aero, add front downforce.',

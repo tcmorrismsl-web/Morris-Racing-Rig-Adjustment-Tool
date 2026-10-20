@@ -110,6 +110,7 @@ h3 {
 .row .k { font-weight: 500; }
 .row .v { font: 600 22px/1.15 var(--cond); text-align: right; color: var(--text); }
 .row .v.rel { font-size: 18px; color: var(--led-amber); max-width: 52vw; }
+.row.long .v { grid-column: 1 / -1; text-align: left; font-size: 19px; max-width: none; }
 .row .why { grid-column: 1 / -1; font-size: 14px; color: var(--muted); }
 .row .now { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin-top: 6px; }
 .row .now input { width: 92px; padding: 7px 9px; }
@@ -118,6 +119,7 @@ h3 {
 .row .cmp.ok { color: var(--led-green); }
 .now-help { margin: 10px 2px 0; }
 .row .range { font-size: 13px; color: var(--muted); text-align: right; grid-column: 2; }
+h4.sub { font: 600 15px/1.2 var(--font, inherit); color: var(--muted); margin: 14px 2px 6px; text-transform: none; }
 .hint { font-size: 13px; color: var(--muted); margin: 6px 2px 0; }
 
 /* Form controls */

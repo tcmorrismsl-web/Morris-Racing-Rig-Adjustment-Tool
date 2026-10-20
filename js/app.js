@@ -78,7 +78,7 @@ function sweepLeds() {
 // Shared bits
 // ---------------------------------------------------------------------------
 const row = (k, v, why, opts = {}) => `
-  <div class="row">
+  <div class="row${String(v).length > 16 ? ' long' : ''}">
     <span class="k">${esc(k)}</span>
     <span class="v${opts.rel ? ' rel' : ''}">${esc(v)}</span>
     ${opts.range ? `<span class="range">${esc(opts.range)}</span>` : ''}
@@ -99,8 +99,7 @@ function renderWheel() {
   let banner = '';
   if (state.wheelSetFor !== g) {
     const from = state.wheelSetFor ? WHEEL_PROFILES[state.wheelSetFor] : null;
-    const items = p.moza.filter((m) => !/preset default/.test(m.value) && (!from || from.moza.find((x) => x.key === m.key)?.value !== m.value));
-    const auto = p.moza.some((m) => /preset default/.test(m.value));
+    const items = p.moza.filter((m) => !/preset default/i.test(m.value) && (!from || from.moza.find((x) => x.key === m.key)?.value !== m.value));
     banner = `
       <section class="switch">
         <h2>Switch the wheel to ${esc(p.name)}</h2>
@@ -112,7 +111,7 @@ function renderWheel() {
           }).join('')}
           <li><input type="checkbox" id="cg"><label for="cg">Check the in-game wheel settings below</label></li>
         </ul>
-        ${auto ? `<p class="small">Choosing the ${esc(p.moza[0].value)} preset resets the other base settings, so you only need the changes above.</p>` : ''}
+        <p class="small">Pick the ${esc(p.moza[0].value)} preset first, because it resets everything else, then work down the list. Settings marked "Preset default" are left as the preset sets them.</p>
         <button type="button" class="btn" data-action="wheel-done">Wheel is set for ${esc(p.name)}</button>
       </section>`;
   }
@@ -126,10 +125,14 @@ function renderWheel() {
     ${banner}
     ${state.wheelSetFor === g ? `<h2>Wheel is set for ${esc(p.name)}</h2><p class="lede">Your MOZA R3 settings for ${esc(p.name)}. If that's wrong, change it above and the checklist comes back.</p>` : ''}
     <h3>MOZA Racing app on your phone</h3>
-    <div class="rows">${p.moza.map((m) => row(m.label, m.value, m.why)).join('')}</div>
+    <p class="small">Every base setting, in the order the app shows them. If a setting isn't in your phone app, it's Pit House only: set it once there and it stays saved on the base.</p>
+    ${[...new Set(p.moza.map((m) => m.group))].map((gName) => `
+      <h4 class="sub">${esc(gName)}</h4>
+      <div class="rows">${p.moza.filter((m) => m.group === gName).map((m) => row(m.label, m.value, m.why)).join('')}</div>`).join('')}
     <h3>In ${esc(p.name)}</h3>
-    <p class="small">${esc(p.game.where)}</p>
-    <div class="rows">${p.game.items.map((m) => row(m.label, m.value, m.why)).join('')}</div>
+    ${p.game.groups.map((gr) => `
+      <h4 class="sub">${esc(gr.where)}</h4>
+      <div class="rows">${gr.items.map((m) => row(m.label, m.value, m.why)).join('')}</div>`).join('')}
     <p class="hint">${esc(p.game.after)}</p>
     <h3>When you switch games</h3>
     <ul class="notes">${SWITCH_TIPS.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
