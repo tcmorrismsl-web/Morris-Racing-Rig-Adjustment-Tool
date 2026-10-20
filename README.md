@@ -12,7 +12,7 @@ On a phone, use "Add to Home Screen" so it opens like an app.
 - **Setup**:
   - *Forza Motorsport*: a tune for any track, class (E to X), drivetrain, weather, time of day, temperature and race length. Pressures, alignment, anti-roll bars, damping, brakes and diff are given as slider values. Springs, ride height, aero and gearing are given as changes from the car's default tune, because Forza scales those per car. Suspension geometry (roll center and anti-geometry) is included as small, late adjustments. Turn on "Enter my current values" to type in what the car has now and see exactly what to change each setting to; values are saved per garage car.
   - *F1 25*: full setup-screen values for the 2025 cars and the 2026 Season Pack cars, for quali or race, dry or wet, and a stable, balanced or aggressive feel.
-- **Garage** (Forza): the cars you own with their PI, class, stats, power, weight and fitted tuning parts. Updating a car logs what changed in its upgrade history. Pick a garage car on the Setup tab and the tune uses its class and drivetrain, and flags settings it can't adjust until you fit the parts. Back up and restore the garage as a file to move it between devices.
+- **Garage** (Forza): pick from all 552 Forza Motorsport cars (the 499-car launch roster by division from Turn 10's official list, plus DLC, Car Pass and Update 20 cars; type any name for cars from other updates). Track the cars you own with their PI, class, stats, power, weight and fitted tuning parts. Updating a car logs what changed in its upgrade history. Pick a garage car on the Setup tab and the tune uses its class and drivetrain, and flags settings it can't adjust until you fit the parts. Back up and restore the garage as a file to move it between devices.
 - **Fix it**: step-by-step fixes for understeer, oversteer, bumps, lock-ups and more. Forza fixes follow your drivetrain.
 - **Data**: live telemetry from the Xbox. After a few laps it turns what the car is doing (understeer or oversteer by corner phase, wheelspin, lock-ups, bottoming out, tyre temperatures and wear) into specific setting changes, and keeps a lap log with the car, track and tune you used. Needs the bridge below.
 - **Saved**: keep tunes and setups you like. They are stored in your browser on that device only.
@@ -40,7 +40,7 @@ Everything here is a rule-based starting point built from published MOZA, Turn 1
 
 - Tracks, wheel settings and F1 ranges: `js/data.js`
 - Forza tuning rules and fixes: `js/forza.js`
-- Garage: `js/garage.js`
+- Garage: `js/garage.js`; Forza car list: `js/cars.js`
 - Telemetry advice: `js/advice.js`; bridge and packet decoding: `bridge/`
 - F1 setup rules and fixes: `js/f1.js`
 

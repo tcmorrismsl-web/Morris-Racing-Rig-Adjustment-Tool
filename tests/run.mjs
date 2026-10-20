@@ -5,6 +5,7 @@ import { FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from '../js/data.js
 import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from '../js/forza.js';
 import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
 import { classFromPi, normalizeCar, upsertCar, diffCar, hasPart, PARTS } from '../js/garage.js';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from '../js/cars.js';
 
 let n = 0;
 const bad = (s) => /NaN|undefined|null|Infinity/.test(s);
@@ -73,6 +74,17 @@ assert.equal(compareValue({ type: 'abs', target: 1, dp: 0 }, ''), null);
 assert.equal(compareValue({ type: 'abs', target: 1, dp: 0 }, 'abc'), null);
 const geo = forzaTune({ track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'wet', time: 'day', temp: 'mild', length: 'medium' });
 assert.ok(geo.sections.some((s) => s.title === 'Suspension geometry'));
+
+// ---------------- Car list ----------------
+assert.ok(FORZA_CARS.length >= 550, `car count ${FORZA_CARS.length}`);
+assert.equal(new Set(FORZA_CARS.map((c) => c.name)).size, FORZA_CARS.length, 'duplicate car names');
+assert.ok(FORZA_CARS.every((c) => c.division && FORZA_DIVISIONS.includes(c.division) && c.year >= 1900 && c.year <= 2030), 'car fields');
+assert.equal(FORZA_CARS.filter((c) => FORZA_DIVISIONS.indexOf(c.division) < 38).length, 499, 'official launch roster is 499 cars');
+assert.equal(findCar('2020 honda #73 la honda world racing CIVIC').division, 'Forza Touring Cars');
+assert.ok(findCar('2020 Honda #73 LA Honda World Racing Civic').raceCar);
+assert.ok(!findCar('2018 Honda Civic Type R').raceCar);
+assert.deepEqual(searchCars('gt3 rs').map((c) => c.name).sort(), ['2016 Porsche 911 GT3 RS', '2019 Porsche 911 GT3 RS']);
+assert.equal(normalizeCar({ name: '1997 McLaren F1 GT' }).division, 'Early Factory Racecars');
 
 // ---------------- Garage ----------------
 assert.equal(classFromPi(300), 'E'); assert.equal(classFromPi(301), 'D'); assert.equal(classFromPi(600), 'B');

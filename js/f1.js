@@ -1,7 +1,7 @@
 // F1 25 setup recommendations for the 2025 cars and the 2026 Season Pack cars.
 // Values are full setup-screen numbers, clamped to the game's ranges.
 
-import { F1_TRACKS, F1_RANGES as R } from './data.js?v=mvg48kkb';
+import { F1_TRACKS, F1_RANGES as R } from './data.js?v=mvg4k0vm';
 
 const clamp = (v, [lo, hi]) => Math.min(hi, Math.max(lo, v));
 const roundTo = (v, step) => Math.round(v / step) * step;

@@ -1,6 +1,7 @@
 // Forza Motorsport garage: the cars you own, their current stats and upgrade history.
 
-import { FORZA_CLASSES } from './data.js?v=mvg48kkb';
+import { findCar } from './cars.js?v=mvg4k0vm';
+import { FORZA_CLASSES } from './data.js?v=mvg4k0vm';
 
 // Stat bars shown on a car's page in Forza Motorsport (0.0–10.0).
 export const STATS = [
@@ -70,6 +71,7 @@ export function normalizeCar(c = {}) {
   return {
     id: String(c.id || `car${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`),
     name: String(c.name || '').trim().slice(0, 80) || 'Unnamed car',
+    division: findCar(c.name)?.division || String(c.division || '').slice(0, 60),
     pi: pi === null ? null : Math.round(pi),
     drivetrain: ['fwd', 'rwd', 'awd'].includes(c.drivetrain) ? c.drivetrain : 'rwd',
     raceCar: !!c.raceCar,

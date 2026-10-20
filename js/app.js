@@ -1,14 +1,15 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg48kkb';
-import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg48kkb';
-import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg48kkb';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg48kkb';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg48kkb';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg48kkb';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg4k0vm';
+import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg4k0vm';
+import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg4k0vm';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg4k0vm';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg4k0vm';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg4k0vm';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg4k0vm';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 19, 11:20 PM'; // set by npm run stamp
+const APP_VERSION = 'Oct 19, 11:29 PM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
@@ -21,7 +22,7 @@ const defaults = {
   links: { forzaCars: {}, forzaTracks: {} }, // Forza car/track numbers from telemetry, linked to your garage and track list
   dataLaps: '3',
   garage: [normalizeCar({
-    id: 'tcr73', name: '2020 Honda #73 LA Honda World Racing Civic Type R TCR', drivetrain: 'fwd', raceCar: true, tyre: 'slick',
+    id: 'tcr73', name: '2020 Honda #73 LA Honda World Racing Civic', drivetrain: 'fwd', raceCar: true, tyre: 'slick',
     history: [{ date: new Date().toISOString(), changes: ['Added to garage'] }],
   })],
 };
@@ -32,7 +33,8 @@ function load(raw) {
     return {
       ...structuredClone(defaults), ...s,
       forza: { ...defaults.forza, ...s.forza }, f1: { ...defaults.f1, ...s.f1 },
-      garage: Array.isArray(s.garage) ? s.garage.map(normalizeCar) : structuredClone(defaults.garage),
+      // The seeded TCR was first saved under a longer name; use Forza's own name so it matches the car list.
+      garage: Array.isArray(s.garage) ? s.garage.map((c) => normalizeCar(c.name === '2020 Honda #73 LA Honda World Racing Civic Type R TCR' ? { ...c, name: '2020 Honda #73 LA Honda World Racing Civic' } : c)) : structuredClone(defaults.garage),
       links: { forzaCars: { ...s.links?.forzaCars }, forzaTracks: { ...s.links?.forzaTracks } },
       current: s.current && typeof s.current === 'object' ? s.current : {},
     };
@@ -53,6 +55,7 @@ const gameName = (g) => WHEEL_PROFILES[g].name;
 const currentCar = () => state.garage.find((c) => c.id === state.forza.carId) || null;
 const dtLabel = (d) => d.toUpperCase();
 let editingId = null; // car being edited in the Garage ('new' for a new car)
+let prefillName = ''; // car picked from the full list for a new garage entry
 
 function toast(msg) {
   const t = $('.toast');
@@ -185,7 +188,7 @@ function renderForza() {
   const hasNow = Object.keys(state.current[nowKey()] || {}).length > 0;
   const cls = FORZA_CLASSES.map((c) => ({ id: c.id, label: c.label }));
   const carPI = car && classFromPi(car.pi);
-  const carOptions = `<option value="">Any car (set class below)</option>${state.garage.map((c) =>
+  const carOptions = `<option value="">Any car (set class below)</option><option value="__add">+ Add a car from the full list</option>${state.garage.map((c) =>
     `<option value="${esc(c.id)}"${c.id === f.carId ? ' selected' : ''}>${esc(c.name)}${classFromPi(c.pi) ? ` (${classFromPi(c.pi)} ${c.pi})` : ''}</option>`).join('')}`;
   view.innerHTML = `
     <h2>Forza tune</h2>
@@ -339,6 +342,7 @@ function carCard(c) {
         <span class="plate" aria-label="${cl ? `${cl} class, PI ${c.pi}` : 'No PI yet'}"><b>${cl || '?'}</b><span>${c.pi ?? '---'}</span></span>
         <div>
           <h4>${esc(c.name)}</h4>
+          ${c.division ? `<p class="division">${esc(c.division)}</p>` : ''}
           <p class="small">${esc(specs)}${c.level ? `. Car level ${esc(c.level)}` : ''}</p>
         </div>
       </div>
@@ -364,6 +368,15 @@ function renderGarage() {
     <div class="actions"><button type="button" class="btn" data-action="add-car">Add a car</button></div>
     ${state.garage.length ? `<div class="cars">${state.garage.map(carCard).join('')}</div>`
       : '<div class="empty">No cars yet. Add the cars you race with.</div>'}
+    <h3>All Forza Motorsport cars</h3>
+    <p class="small">${FORZA_CARS.length} cars by division. Tap one to add it to your garage. Cars from some recent updates may be missing; add those by typing the name.</p>
+    <div class="browse">${FORZA_DIVISIONS.map((d) => {
+      const list = FORZA_CARS.filter((c) => c.division === d);
+      return `<details><summary>${esc(d)} <span class="small">${list.length}</span></summary><ul>${list.map((c) => {
+        const owned = state.garage.some((g) => g.name === c.name);
+        return `<li><button type="button" class="pick" data-action="add-from-list" data-name="${esc(c.name)}"${owned ? ' disabled' : ''}>${esc(c.name)}${owned ? ' <span class="small">In garage</span>' : ''}</button></li>`;
+      }).join('')}</ul></details>`;
+    }).join('')}</div>
     <div class="actions">
       <button type="button" class="btn ghost" data-action="export">Back up garage</button>
       <label class="btn ghost file">Restore backup<input type="file" accept="application/json,.json" data-import></label>
@@ -376,14 +389,19 @@ const numInput = (name, label, value, attrs) => `
 
 function renderCarForm() {
   const isNew = editingId === 'new';
-  const c = isNew ? normalizeCar({ name: '' }) : state.garage.find((x) => x.id === editingId);
+  const listed = isNew && prefillName ? findCar(prefillName) : null;
+  const c = isNew ? normalizeCar({ name: prefillName, raceCar: listed?.raceCar }) : state.garage.find((x) => x.id === editingId);
+  prefillName = '';
   if (!c) { editingId = null; renderGarage(); return; }
   const cl = classFromPi(c.pi);
   view.innerHTML = `
     <h2>${isNew ? 'Add a car' : 'Update car'}</h2>
-    <p class="lede">Copy the numbers from the car's page in Forza. Leave anything you don't know blank.</p>
+    <p class="lede">Pick the car, then copy the numbers from its page in Forza. Leave anything you don't know blank.</p>
     <form id="car-form" class="form" data-id="${esc(c.id)}" novalidate>
-      <label class="field wide"><span>Car</span><input type="text" name="name" value="${isNew ? '' : esc(c.name)}" placeholder="For example 2020 Honda Civic Type R TCR" required maxlength="80" autocomplete="off"></label>
+      <div class="field wide car-search"><label for="car-name"><span>Car</span></label>
+        <input type="text" id="car-name" name="name" value="${c.name === 'Unnamed car' ? '' : esc(c.name)}" placeholder="Start typing, for example civic or 911 gt3" required maxlength="80" autocomplete="off" autocapitalize="off" spellcheck="false" aria-describedby="car-match">
+        <div class="suggest" role="listbox" aria-label="Matching cars"></div>
+        <p class="small car-match" id="car-match">${matchText(c.name)}</p></div>
       <label class="field"><span>PI <output class="pi-class">${cl ? `${cl} class` : ''}</output></span><input type="number" name="pi" value="${c.pi ?? ''}" min="100" max="999" inputmode="numeric" placeholder="100–999"></label>
       <label class="field"><span>Drivetrain</span><select name="drivetrain">${DRIVETRAINS.map((d) => `<option value="${d.id}"${d.id === c.drivetrain ? ' selected' : ''}>${d.label}</option>`).join('')}</select></label>
       <label class="field"><span>Tyre compound</span><select name="tyre">${TYRES.map((t) => `<option value="${t.id}"${t.id === c.tyre ? ' selected' : ''}>${t.label}</option>`).join('')}</select></label>
@@ -412,6 +430,20 @@ function renderCarForm() {
       ${isNew ? '' : `<button type="button" class="btn ghost danger wide" data-action="delete-car" data-id="${esc(c.id)}">Remove from garage</button>`}
     </form>`;
   $('#car-form [name=name]').focus({ preventScroll: true });
+}
+
+function matchText(name) {
+  if (!name || name === 'Unnamed car') return '';
+  const m = findCar(name);
+  return m ? `${esc(m.division)}${m.raceCar ? ', factory race car' : ''}` : 'Not in the list. Fine if it\'s a newer car; use the name Forza shows.';
+}
+
+function showSuggestions(input) {
+  const box = input.parentElement.querySelector('.suggest');
+  const exact = findCar(input.value);
+  const list = exact ? [] : searchCars(input.value, 8);
+  box.innerHTML = list.map((c) => `<button type="button" role="option" class="pick" data-pick="${esc(c.name)}">${esc(c.name)} <span class="small">${esc(c.division)}</span></button>`).join('');
+  input.parentElement.querySelector('.car-match').innerHTML = list.length ? '' : matchText(input.value);
 }
 
 function readCarForm(form) {
@@ -662,12 +694,24 @@ view.addEventListener('click', (e) => {
     persist(); render();
     return;
   }
+  const pick = e.target.closest('[data-pick]');
+  if (pick) {
+    const form = $('#car-form');
+    const input = form.elements.name;
+    input.value = pick.dataset.pick;
+    const m = findCar(input.value);
+    if (m?.raceCar) form.elements.raceCar.checked = true;
+    showSuggestions(input);
+    form.elements.pi.focus();
+    return;
+  }
   const issue = e.target.closest('[data-issue]');
   if (issue) { openIssue = openIssue === issue.dataset.issue ? null : issue.dataset.issue; render(); return; }
   const act = e.target.closest('[data-action]');
   if (!act) return;
   const a = act.dataset.action;
   if (a === 'add-car') { editingId = 'new'; render(); window.scrollTo({ top: 0 }); return; }
+  if (a === 'add-from-list') { editingId = 'new'; prefillName = act.dataset.name; render(); window.scrollTo({ top: 0 }); return; }
   if (a === 'edit-car') { editingId = act.dataset.id; state.tab = 'garage'; persist(); render(); window.scrollTo({ top: 0 }); return; }
   if (a === 'cancel-car') { editingId = null; render(); window.scrollTo({ top: 0 }); return; }
   if (a === 'delete-car') {
@@ -723,6 +767,7 @@ view.addEventListener('change', (e) => {
   if (el.dataset.ctx) { setContext(el.dataset.ctx, el.value); return; }
   if (el.dataset.now) return;
   const target = state.game === 'forza' ? state.forza : state.f1;
+  if (el.dataset.field === 'carId' && el.value === '__add') { editingId = 'new'; state.tab = 'garage'; persist(); render(); window.scrollTo({ top: 0 }); return; }
   if (el.dataset.field === 'carId') { selectCar(el.value); persist(); render(); return; }
   if (el.dataset.field) { target[el.dataset.field] = el.value; persist(); render(); }
   if (el.dataset.check) { target[el.dataset.check] = el.checked; persist(); render(); }
@@ -743,6 +788,7 @@ view.addEventListener('input', (e) => {
     clearTimeout(nowSave); nowSave = setTimeout(persist, 400);
     return;
   }
+  if (e.target.matches('#car-form [name=name]')) { showSuggestions(e.target); return; }
   if (e.target.matches('#car-form [name=pi]')) {
     const cl = classFromPi(e.target.value);
     $('#car-form .pi-class').textContent = cl ? `${cl} class` : '';
