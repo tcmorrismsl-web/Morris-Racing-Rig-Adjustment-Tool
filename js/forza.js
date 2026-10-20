@@ -3,8 +3,8 @@
 // Absolute values use Forza's own slider scales; items Forza scales per car
 // (springs, ride height, aero, gearing) are given as changes from the car's default tune.
 
-import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvg41vue';
-import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvg41vue';
+import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvg48kkb';
+import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvg48kkb';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -70,7 +70,7 @@ export function forzaTune(input) {
   const aero = car ? hasPart(car, 'aero') : (input.aero ?? cls.tier >= 2);
   const tier = cls.tier; // 0..3
   const long = length === 'long';
-  // Forgiving (default): stable and predictable, built around Normal steering and Sport stability control.
+  // Forgiving (default): stable and predictable, built around Normal steering and stability control on.
   // Sharp: the more pointy, faster setup for drivers who run with fewer assists.
   const easy = input.feel !== 'sharp';
 
@@ -272,7 +272,7 @@ export function forzaTune(input) {
   // ---------------- Notes ----------------
   notes.unshift(track.note);
   notes.splice(1, 0, easy
-    ? 'Forgiving: built to work with Normal steering, Sport stability and Sport traction control. Stable on the brakes and on the power, for clean laps. Switch to Sharp once you want more speed.'
+    ? 'Forgiving: built to work with Normal steering, stability control on and Sport traction control. Stable on the brakes and on the power, for clean laps. Switch to Sharp once you want more speed.'
     : 'Sharp: pointier and faster, for driving with Simulation steering and stability control off. Less forgiving of mistakes.');
   if (car && !carCls) notes.push(`Add a PI for ${car.name} in the Garage so the tune uses the right class. Using ${cls.id} class for now.`);
   if (car && ['stock', 'street', 'sport'].includes(car.tyre)) notes.push(`${TYRES.find((t) => t.id === car.tyre).label} tyres overheat sooner than race tyres. Aim for the low end of the hot pressure target.`);

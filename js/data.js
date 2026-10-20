@@ -38,7 +38,7 @@ export const WHEEL_PROFILES = {
           where: 'Settings, then Driving Assists',
           items: [
             { label: 'Steering', value: 'Normal', why: 'Smooths your inputs and stops you turning more than the tyres can take. Turn in smoothly rather than snapping the wheel, and it rewards you.' },
-            { label: 'Stability control', value: 'Sport', why: 'Catches a slide before it becomes a spin, but still lets the car move around.' },
+            { label: 'Stability control', value: 'On', why: 'Catches slides early and keeps the car pointed where you\'re steering. If the car feels like it won\'t rotate into tight corners, try Sport.' },
             { label: 'Traction control', value: 'Sport', why: 'Stops wheelspin out of slow corners without killing the drive.' },
             { label: 'ABS', value: 'On', why: 'Brake hard without locking up. Most of the field races with it on.' },
           ],
@@ -74,7 +74,7 @@ export const WHEEL_PROFILES = {
           ],
         },
       ],
-      after: 'Set up to feel like a real car but stay easy to drive with Normal steering and Sport stability. Too light: raise force feedback scale, then mechanical trail. Too twitchy: raise wheel damper scale 5 at a time. Change one thing, drive a lap, then the next.',
+      after: 'Set up to feel like a real car but stay easy to drive with Normal steering and stability control on. Too light: raise force feedback scale, then mechanical trail. Too twitchy: raise wheel damper scale 5 at a time. Change one thing, drive a lap, then the next.',
     },
   },
   f1: {
