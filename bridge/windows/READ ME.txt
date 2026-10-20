@@ -1,0 +1,22 @@
+Morris Racing bridge
+
+This folder is plain, readable code. There is no .exe in it. It runs on
+Node.js, the free, signed runtime from nodejs.org.
+
+First time only:
+1. Install Node.js: go to https://nodejs.org, download the LTS version for
+   Windows and install it with the default options.
+
+Every time you race:
+1. Double-click "Start Morris Racing Bridge.cmd".
+   If Windows asks about network access, tick Private networks only.
+2. The window shows an address like http://192.168.1.20:8080. Open it on your phone.
+3. In the game, send telemetry to the IP address shown, using the ports shown.
+4. Keep the window open while you race. Close it when you are done.
+
+What it does: listens for Forza Motorsport and F1 25 telemetry on your Wi-Fi,
+saves your laps to the MorrisRacing folder in your user folder, and serves the
+app to your phone. The code is in the "bridge" folder (bridge.js, parsers.js,
+laps.js) if you want to read it.
+
+If something goes wrong, the window stays open with a message. Send a photo of it.

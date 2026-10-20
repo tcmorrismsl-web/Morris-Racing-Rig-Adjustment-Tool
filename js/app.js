@@ -1,14 +1,14 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg323ds';
-import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg323ds';
-import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg323ds';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg323ds';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg323ds';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg323ds';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg3bioj';
+import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg3bioj';
+import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg3bioj';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg3bioj';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg3bioj';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg3bioj';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 19, 10:47 PM'; // set by npm run stamp
+const APP_VERSION = 'Oct 19, 10:54 PM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
@@ -496,9 +496,10 @@ function renderDataSetup() {
     <p class="lede">Send telemetry from the Xbox to your laptop. You get setting changes worked out from your own laps, and a log of every lap with the car and tune you used.</p>
     <h3>Set it up once</h3>
     <ol class="setup-steps">
-      <li><b>Download the bridge to your Windows laptop</b> and unzip it.
+      <li><b>Install Node.js on your Windows laptop</b> (first time only). Get the LTS version from <a href="https://nodejs.org/en/download" target="_blank" rel="noopener">nodejs.org</a> and install it with the default options. It's the free, signed program that runs the bridge.</li>
+      <li><b>Download the bridge</b> and unzip it. It's plain, readable code with no .exe.
         <a class="btn inline" href="dist/MorrisRacingBridge.zip" download>Download for Windows</a></li>
-      <li><b>Run MorrisRacingBridge.exe.</b> Windows may warn that the app isn't recognised, because it isn't from a big publisher. Choose More info, then Run anyway. If Windows asks about network access, allow Private networks.</li>
+      <li><b>Double-click "Start Morris Racing Bridge"</b> in the unzipped folder. If Windows asks about network access, allow Private networks only.</li>
       <li><b>Open the address the bridge shows on your phone</b>, for example http://192.168.1.20:8080. Use that address while racing. This copy of the app can't receive data.</li>
       <li><b>Point ${esc(gameName(g))} at your laptop</b> with these settings:</li>
     </ol>

@@ -21,8 +21,8 @@ On a phone, use "Add to Home Screen" so it opens like an app.
 
 The Xbox sends telemetry over your home network, which a phone browser can't receive, so a small bridge program runs on a Windows laptop on the same Wi-Fi.
 
-1. Download [MorrisRacingBridge.zip](https://github.com/tcmorrismsl-web/Morris-Racing-Rig-Adjustment-Tool/raw/main/dist/MorrisRacingBridge.zip) and unzip it.
-2. Run `MorrisRacingBridge.exe`. Windows SmartScreen may warn because it is unsigned: choose More info, then Run anyway. Allow it on Private networks if asked.
+1. Install [Node.js](https://nodejs.org/en/download) (LTS) on the laptop, first time only.
+2. Download [MorrisRacingBridge.zip](https://github.com/tcmorrismsl-web/Morris-Racing-Rig-Adjustment-Tool/raw/main/dist/MorrisRacingBridge.zip), unzip it and double-click `Start Morris Racing Bridge.cmd`. The zip is plain code (no .exe), so antivirus has nothing to flag. Allow it on Private networks if asked.
 3. Open the address it shows (for example `http://192.168.1.20:8080`) on your phone. Use that copy of the app while racing.
 4. In the game:
    - **Forza Motorsport**: Settings, Gameplay & HUD, UDP Race Telemetry. Data Out On, IP = laptop address, port 5300, packet format Car Dash.
@@ -44,7 +44,7 @@ Everything here is a rule-based starting point built from published MOZA, Turn 1
 - Telemetry advice: `js/advice.js`; bridge and packet decoding: `bridge/`
 - F1 setup rules and fixes: `js/f1.js`
 
-Run `npm test` to check every track, class and condition combination still produces in-range values, and to run the telemetry decoding and bridge tests with simulated packets. `npm run build:bridge` rebuilds the Windows program.
+Run `npm test` to check every track, class and condition combination still produces in-range values, and to run the telemetry decoding and bridge tests with simulated packets. `npm run build:bridge` rebuilds the bridge zip.
 
 ## Run locally
 
