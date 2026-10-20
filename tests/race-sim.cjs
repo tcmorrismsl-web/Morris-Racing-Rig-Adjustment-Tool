@@ -187,7 +187,11 @@ class F1Sim {
   setup() {
     const body = Buffer.alloc(this.n * 50 + 4);
     const o = this.player * 50;
-    body.writeUInt8(65, o + 2); body.writeUInt8(45, o + 3); body.writeUInt8(56, o + 27); body.writeUInt8(0, o + 28);
+    [22, 18, 65, 45].forEach((v, k) => body.writeUInt8(v, o + k));
+    [-3.2, -1.7, 0.05, 0.2].forEach((v, k) => body.writeFloatLE(v, o + 4 + k * 4));
+    [36, 3, 9, 16, 22, 50, 100, 56, 0].forEach((v, k) => body.writeUInt8(v, o + 20 + k));
+    [24.0, 24.0, 26.5, 26.5].forEach((v, k) => body.writeFloatLE(v, o + 29 + k * 4)); // RL, RR, FL, FR
+    body.writeUInt8(6, o + 45); body.writeFloatLE(30, o + 46);
     return Buffer.concat([header(this.format, 5, this.t, this.player, this.uid), body]);
   }
 

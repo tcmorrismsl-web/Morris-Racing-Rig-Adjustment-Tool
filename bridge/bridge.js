@@ -48,8 +48,13 @@ function send(event, data) {
 }
 
 function addLap(lap) {
-  const ctx = context[lap.game] || {};
-  const full = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: new Date().toISOString(), context: { ...ctx }, ...lap };
+  const ctx = { ...(context[lap.game] || {}) };
+  // F1: record the setup and tyre actually in use, from the game itself.
+  if (lap.game === 'f1') {
+    const u = f1Race.inUse();
+    if (u) { ctx.setup = u.setup; ctx.compound = u.compound; ctx.era = u.era; ctx.session = u.session; ctx.weather = u.weather; }
+  }
+  const full = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, at: new Date().toISOString(), context: ctx, ...lap };
   laps.push(full);
   if (laps.length > MAX_LAPS) laps = laps.slice(-MAX_LAPS);
   writeJson(FILES.laps, laps);
@@ -120,7 +125,7 @@ function status() {
   const flow = (s) => ({ packets: s.packets, receiving: !!s.last && now - s.last < 3000, last: s.last });
   return {
     bridge: true, version: VERSION, ports: PORTS, addresses: lanAddresses(),
-    forza: { ...flow(stats.forza), live: forza.live }, f1: { ...flow(stats.f1), live: f1.live },
+    forza: { ...flow(stats.forza), live: forza.live }, f1: { ...flow(stats.f1), live: f1.live, inUse: f1Race.inUse() },
     laps: laps.length, context,
   };
 }

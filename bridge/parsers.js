@@ -219,10 +219,20 @@ function parseF1(b) {
       if (stride < 29) return out;
       const o = HEADER + pi * stride;
       out.type = 'setup';
-      out.diffOn = b.readUInt8(o + 2);
-      out.diffOff = b.readUInt8(o + 3);
-      out.brakeBias = b.readUInt8(o + 27);
-      out.engineBraking = b.readUInt8(o + 28);
+      Object.assign(out, {
+        frontWing: b.readUInt8(o), rearWing: b.readUInt8(o + 1),
+        diffOn: b.readUInt8(o + 2), diffOff: b.readUInt8(o + 3),
+        frontCamber: b.readFloatLE(o + 4), rearCamber: b.readFloatLE(o + 8),
+        frontToe: b.readFloatLE(o + 12), rearToe: b.readFloatLE(o + 16),
+        frontSusp: b.readUInt8(o + 20), rearSusp: b.readUInt8(o + 21),
+        frontArb: b.readUInt8(o + 22), rearArb: b.readUInt8(o + 23),
+        frontRide: b.readUInt8(o + 24), rearRide: b.readUInt8(o + 25),
+        brakePressure: b.readUInt8(o + 26), brakeBias: b.readUInt8(o + 27), engineBraking: b.readUInt8(o + 28),
+        // Tyre pressures in F1 order RL, RR, FL, FR
+        tyrePressure: reorder([b.readFloatLE(o + 29), b.readFloatLE(o + 33), b.readFloatLE(o + 37), b.readFloatLE(o + 41)]),
+        ballast: b.readUInt8(o + 45),
+        fuelLoad: b.readFloatLE(o + 46),
+      });
       return out;
     }
     case 7: { // Car status: 55 bytes per car (59 in 2026; a field was added after ERS store)

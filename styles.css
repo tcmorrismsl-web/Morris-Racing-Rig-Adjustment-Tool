@@ -306,3 +306,10 @@ textarea { resize: vertical; }
 .browse .pick .small { display: inline; margin-left: 6px; }
 
 .dash-link { display: block; text-align: center; text-decoration: none; margin: 12px 0 4px; }
+
+/* F1 setup in use, from the game */
+.inuse-head { display: grid; gap: 4px; margin-bottom: 8px; }
+.inuse-head b { font: 600 18px/1.25 var(--cond); }
+.inuse-head .link { justify-self: start; }
+.row.inuse.off .v { color: var(--gold); }
+.row.inuse.off .why { color: var(--alu); }

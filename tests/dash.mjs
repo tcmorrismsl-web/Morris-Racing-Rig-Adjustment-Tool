@@ -36,7 +36,7 @@ function runF1(format) {
 }
 
 for (const format of [2025, 2026]) {
-  const { s, store, sim, sawTwoCompound } = runF1(format);
+  const { s, store, sim, race, sawTwoCompound } = runF1(format);
   const active = sim.active;
   // Timing tower
   assert.equal(s.tower.length, active, `${format}: tower has every active car`);
@@ -78,6 +78,12 @@ for (const format of [2025, 2026]) {
   assert.ok(/Lower on-throttle diff \(now 65%\)/.test(titles), 'diff advice');
   assert.ok(/Rears hot \(109°C\)/.test(titles), 'tyre temp advice');
   if (format === 2025) assert.ok(/ERS low \(10%\)/.test(titles), 'ERS advice'); else assert.ok(!/ERS/.test(titles), 'no ERS % for 2026');
+  // What's in use, straight from the game
+  const u = race.inUse();
+  assert.equal(u.era, format >= 2026 ? 2026 : 2025); assert.equal(u.track, 'austria'); assert.equal(u.session, 'race');
+  assert.equal(u.totalLaps, 15); assert.equal(u.weather, 'dry'); assert.equal(u.compound, 'hard');
+  assert.deepEqual({ fw: u.setup.frontWing, rw: u.setup.rearWing, on: u.setup.diffOn, off: u.setup.diffOff, fc: u.setup.frontCamber, rc: u.setup.rearCamber, ft: u.setup.frontToe, rt: u.setup.rearToe, fs: u.setup.frontSusp, rs: u.setup.rearSusp, fa: u.setup.frontArb, ra: u.setup.rearArb, fr: u.setup.frontRide, rr: u.setup.rearRide, bp: u.setup.brakePressure, bb: u.setup.brakeBias, ftp: u.setup.frontTyre, rtp: u.setup.rearTyre, fuel: u.setup.fuelLoad },
+    { fw: 22, rw: 18, on: 65, off: 45, fc: -3.2, rc: -1.7, ft: 0.05, rt: 0.2, fs: 36, rs: 3, fa: 9, ra: 16, fr: 22, rr: 50, bp: 100, bb: 56, ftp: 26.5, rtp: 24, fuel: 30 }, `${format}: setup decoded`);
   // Events
   assert.ok(s.events[0].text.startsWith('Fastest lap:') && s.events[0].text.includes('1:18.456'), s.events[0].text);
 }

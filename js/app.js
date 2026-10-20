@@ -1,15 +1,15 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg687ce';
-import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg687ce';
-import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg687ce';
-import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg687ce';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg687ce';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg687ce';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg687ce';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg6oqeh';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg6oqeh';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg6oqeh';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg6oqeh';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg6oqeh';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg6oqeh';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg6oqeh';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 20, 12:16 AM'; // set by npm run stamp
+const APP_VERSION = 'Oct 20, 12:29 AM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
@@ -236,6 +236,53 @@ function f1Input() {
   return { ...f, laps };
 }
 
+// ---------------------------------------------------------------------------
+// F1: what's in use, read live from the game by the bridge
+// ---------------------------------------------------------------------------
+const f1InUse = () => (live.bridge && live.status?.f1?.inUse) || null;
+const COMPOUND_LABEL = { soft: 'Soft', medium: 'Medium', hard: 'Hard', inter: 'Inter', wet: 'Wet' };
+// Smallest change worth flagging for each setting.
+const F1_STEP = { frontWing: 1, rearWing: 1, diffOn: 5, diffOff: 5, frontCamber: 0.1, rearCamber: 0.1, frontToe: 0.05, rearToe: 0.05, frontSusp: 1, rearSusp: 1, frontArb: 1, rearArb: 1, frontRide: 1, rearRide: 1, brakePressure: 1, brakeBias: 1, frontTyre: 0.2, rearTyre: 0.2 };
+
+function f1InputsFromGame(u) {
+  const out = { era: u.era };
+  if (u.track && F1_TRACKS.some((t) => t.id === u.track)) out.track = u.track;
+  if (u.session) out.session = u.session;
+  if (u.weather) out.weather = u.weather;
+  if (u.compound) out.compound = u.compound;
+  if (u.totalLaps) { out.dist = 'custom'; out.laps = String(u.totalLaps); }
+  return out;
+}
+
+function liveF1Summary(u) {
+  const t = F1_TRACKS.find((x) => x.id === u.track);
+  return [t ? t.name : 'Track not recognised', u.sessionType, `${u.era} cars`, u.totalLaps ? `${u.totalLaps} laps` : '', u.weatherName ? `${u.weatherName}${u.trackTemp !== null ? `, track ${u.trackTemp}°C` : ''}` : '', u.compound ? `${COMPOUND_LABEL[u.compound]} tyres${u.tyreAge !== null ? ` (${u.tyreAge} lap${u.tyreAge === 1 ? '' : 's'} old)` : ''}` : ''].filter(Boolean).join(' · ');
+}
+
+function renderInUseF1() {
+  const u = f1InUse();
+  if (!u) return `<div class="empty">Waiting for F1 25. Start a session and the track, session, weather, tyres and the setup on your car fill in here automatically.</div>`;
+  const rec = f1Setup({ ...state.f1, ...f1InputsFromGame(u), style: state.f1.style });
+  const rows = !u.setup ? '<p class="small">The game hasn\'t sent your setup yet. It arrives a few seconds into the session.</p>'
+    : F1_ROWS.map((g) => `
+      <h4 class="sub">${esc(g.group)}</h4>
+      <div class="rows">${g.items.map(([k, label, unit = '', dp = 0]) => {
+        const fmt = (n) => (n === null || n === undefined ? '–' : `${dp ? Number(n).toFixed(dp) : n}${unit}`);
+        const cur = u.setup[k], sug = rec.v[k];
+        const off = cur !== null && sug !== undefined && Math.abs(cur - sug) >= F1_STEP[k] - 1e-9;
+        return `<div class="row inuse${off ? ' off' : ''}"><span class="k">${esc(label)}</span><span class="v">${fmt(cur)}</span>
+          <span class="why">${off ? `Suggested ${fmt(sug)}: ${cur < sug ? 'raise' : 'lower'} by ${fmt(Math.round(Math.abs(sug - cur) * 100) / 100).replace(unit, '')}${unit}` : 'Matches the suggestion'}</span></div>`;
+      }).join('')}</div>`).join('');
+  const diffs = u.setup ? F1_ROWS.flatMap((g) => g.items).filter(([k]) => Math.abs(u.setup[k] - rec.v[k]) >= F1_STEP[k] - 1e-9).length : 0;
+  return `
+    <div class="live-card inuse-head"><b>${esc(liveF1Summary(u))}</b>
+      ${u.setup ? `<span class="small">${diffs ? `${diffs} setting${diffs === 1 ? '' : 's'} differ from the app's suggestion for this session (${esc(F1_STYLES.find((x) => x.id === state.f1.style).label.toLowerCase())} feel).` : 'Your setup matches the app\'s suggestion.'} Fuel ${u.setup.fuelLoad} kg.</span>` : ''}
+    </div>
+    <div class="actions"><button type="button" class="btn ghost" data-action="f1-from-game">Use these in the Setup tab</button></div>
+    ${rows}
+    <p class="hint">Read from the game. Every lap is logged with the setup and tyres in use, so you can compare them later.</p>`;
+}
+
 function renderF1() {
   const f = state.f1;
   const tracks = F1_TRACKS.filter((t) => !t.only || t.only === Number(f.era));
@@ -249,6 +296,7 @@ function renderF1() {
   view.innerHTML = `
     <h2>F1 25 setup</h2>
     <p class="lede">Full setup-screen values. Enter them in Car Setup before the session.</p>
+    ${f1InUse() ? `<div class="live-card inuse-head"><span class="small">Live from F1 25: ${esc(liveF1Summary(f1InUse()))}</span><button type="button" class="link" data-action="f1-from-game">Fill in from the game</button></div>` : ''}
     <div class="form">
       ${field('Cars', seg('era', [{ id: 2025, label: '2025 cars' }, { id: 2026, label: '2026 Season Pack' }], f.era), true)}
       ${field('Track', `<select data-field="track">${tracks.map((t) => `<option value="${t.id}"${t.id === f.track ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`, true)}
@@ -594,7 +642,7 @@ function renderData() {
       ${liveCar?.pi ? `<p class="small wide car-line">The game reports PI ${esc(liveCar.pi)}, ${dtLabel(liveCar.drivetrain || 'rwd')}.</p>` : ''}
       ${field('Track', `<select data-ctx="trackId"><option value="">Not set</option>${FORZA_TRACKS.map((t) => `<option value="${t.id}"${t.id === ctx.trackId ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`, true)}
       ${field('Tune in use', `<select data-ctx="tune"><option value="">Not set</option>${savedForGame.map((x) => `<option${x.name === ctx.tune ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`, true)}`
-    : `${field('Setup in use', `<select data-ctx="tune"><option value="">Not set</option>${savedForGame.map((x) => `<option${x.name === ctx.tune ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>`, true)}`;
+    : '';
 
   view.innerHTML = `
     <h2>Live data</h2>
@@ -602,10 +650,10 @@ function renderData() {
     <a class="btn dash-link" href="dash.html?game=${g}">Race dashboard</a>
     <p class="small">Track map, ${g === 'f1' ? 'timing tower, pit options and on-track adjustments' : 'lap timing with a live delta, fuel and tyre estimates and driving tips'}. Best on a tablet or a phone turned sideways.</p>
 
-    <h3>What you're driving</h3>
-    <div class="form">${contextForm}
-      <p class="small wide">New laps are logged with these.${g === 'forza' ? ' The game only reports a number for the car and track, so set them once and they are remembered.' : ''}</p>
-    </div>
+    <h3>${g === 'f1' ? 'In use now' : 'What you\'re driving'}</h3>
+    ${g === 'f1' ? renderInUseF1() : `<div class="form">${contextForm}
+      <p class="small wide">New laps are logged with these. The game only reports a number for the car and track, so set them once and they are remembered.</p>
+    </div>`}
 
     <h3>Setting changes from your laps</h3>
     ${latest ? `<div class="small using">${esc(trackName(latest.laps.at(-1)))}, ${esc(carLabel(latest.laps.at(-1)))}. Using the last ${seg('dataLaps', [{ id: '3', label: '3' }, { id: '5', label: '5' }, { id: 'all', label: 'All' }], state.dataLaps)} laps of this session.</div>` : ''}
@@ -624,9 +672,9 @@ function renderData() {
     ${sess.length ? sess.slice(0, 15).map((ss) => {
       const st = lapStats(ss.laps);
       const last = ss.laps.at(-1);
-      const tune = last.context?.tune;
+      const tune = last.context?.tune || (last.context?.compound ? `${COMPOUND_LABEL[last.context.compound]} tyres` : '');
       return `<details class="session"${ss === latest ? ' open' : ''}>
-        <summary><b>${esc(trackName(last))}</b><span class="small">${esc(carLabel(last))}${tune ? `, tune: ${esc(tune)}` : ''}. ${esc(new Date(ss.laps[0].at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${st ? `. Best ${fmtLap(st.best)}` : ''}</span></summary>
+        <summary><b>${esc(trackName(last))}</b><span class="small">${esc(carLabel(last))}${tune ? (last.game === 'f1' ? `, ${esc(tune)}` : `, tune: ${esc(tune)}`) : ''}. ${esc(new Date(ss.laps[0].at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}${st ? `. Best ${fmtLap(st.best)}` : ''}</span></summary>
         <table class="laps"><thead><tr><th>Lap</th><th>Time</th><th>Gap</th></tr></thead><tbody>
         ${ss.laps.map((l) => `<tr class="${st && l.timeMs === st.best && l.valid !== false ? 'best' : ''}${l.valid === false ? ' invalid' : ''}">
           <td>${esc(l.lap)}</td><td>${fmtLap(l.timeMs)}${l.valid === false ? ' (invalid)' : ''}</td><td>${st && l.valid !== false ? (l.timeMs === st.best ? 'Best' : `+${((l.timeMs - st.best) / 1000).toFixed(3)}`) : ''}</td></tr>`).join('')}
@@ -754,6 +802,13 @@ view.addEventListener('click', (e) => {
   }
   if (a === 'wheel-done') { state.wheelSetFor = state.game; persist(); render(); toast(`Wheel set for ${gameName(state.game)}`); window.scrollTo({ top: 0 }); }
   if (a === 'save') saveCurrent();
+  if (a === 'f1-from-game') {
+    const u = f1InUse();
+    if (!u) return;
+    Object.assign(state.f1, f1InputsFromGame(u));
+    state.game = 'f1'; state.tab = 'setup';
+    persist(); render(); window.scrollTo({ top: 0 }); toast('Filled in from the game');
+  }
   if (a === 'clear-now') {
     if (!confirm('Clear the values you entered?')) return;
     delete state.current[nowKey()];
@@ -842,6 +897,7 @@ view.addEventListener('submit', (e) => {
 render();
 sweepLeds();
 
+let lastInUse = '';
 // If this copy of the app was opened from the laptop bridge, switch on live data.
 detectBridge().then(async (isBridge) => {
   if (!isBridge) return;
@@ -858,6 +914,13 @@ detectBridge().then(async (isBridge) => {
       autoContext();
       const el = document.getElementById('live-line');
       if (state.tab === 'data' && el) el.innerHTML = liveLine(state.game);
+      // Redraw when the F1 session, tyres or setup in the game change.
+      const u = live.status?.f1?.inUse;
+      const sig = u ? JSON.stringify([u.track, u.session, u.weather, u.compound, u.era, u.totalLaps, u.setup]) : '';
+      if (sig !== lastInUse) {
+        lastInUse = sig;
+        if (state.game === 'f1' && (state.tab === 'data' || state.tab === 'setup') && !view.contains(document.activeElement)) render();
+      }
       return;
     }
     if (what === 'lap') toast('Lap logged');

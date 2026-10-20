@@ -361,6 +361,39 @@ class F1Race {
     return { ready: true, items: out, bias: bias || null, diffOn: this.setup?.diffOn ?? null, ers: Number.isFinite(st.ersStore) && this.format < 2026 ? round((st.ersStore / 4e6) * 100) : null };
   }
 
+  // What's in use right now, straight from the game: session, tyre and the setup on the car.
+  inUse() {
+    const s = this.session;
+    if (!this.lastSeen || Date.now() - this.lastSeen > 10000) return null;
+    const st = this.status[this.player] || {};
+    const u = this.setup;
+    const r1 = (v, d) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : null);
+    // Online, the game hides other cars' setups as zeros; a zero front wing and ride height means no data.
+    const setup = u && (u.frontWing || u.frontRide) ? {
+      frontWing: u.frontWing, rearWing: u.rearWing, diffOn: u.diffOn, diffOff: u.diffOff,
+      frontCamber: r1(u.frontCamber, 2), rearCamber: r1(u.rearCamber, 2), frontToe: r1(u.frontToe, 2), rearToe: r1(u.rearToe, 2),
+      frontSusp: u.frontSusp, rearSusp: u.rearSusp, frontArb: u.frontArb, rearArb: u.rearArb,
+      frontRide: u.frontRide, rearRide: u.rearRide, brakePressure: u.brakePressure, brakeBias: u.brakeBias,
+      frontTyre: r1((u.tyrePressure[0] + u.tyrePressure[1]) / 2, 1), rearTyre: r1((u.tyrePressure[2] + u.tyrePressure[3]) / 2, 1),
+      fuelLoad: r1(u.fuelLoad, 1), engineBraking: u.engineBraking,
+    } : null;
+    return {
+      era: this.format >= 2026 ? 2026 : 2025,
+      format: this.format,
+      track: s.track || null,
+      trackId: s.trackId ?? null,
+      sessionType: SESSION[s.sessionType] || null,
+      session: isRace(s.sessionType) ? 'race' : s.sessionType ? 'quali' : null,
+      totalLaps: isRace(s.sessionType) ? s.totalLaps || null : null,
+      weather: s.weather === undefined ? null : s.weather >= 3 ? 'wet' : 'dry',
+      weatherName: WEATHER[s.weather] ?? null,
+      trackTemp: s.trackTemp ?? null,
+      compound: { 16: 'soft', 17: 'medium', 18: 'hard', 7: 'inter', 8: 'wet' }[st.visual] || null,
+      tyreAge: st.tyreAge ?? null,
+      setup,
+    };
+  }
+
   track() { return { key: this.trackKey, ...this.outline.toJSON() }; }
 }
 
