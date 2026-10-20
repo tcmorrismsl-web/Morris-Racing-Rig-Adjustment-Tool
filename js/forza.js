@@ -3,8 +3,8 @@
 // Absolute values use Forza's own slider scales; items Forza scales per car
 // (springs, ride height, aero, gearing) are given as changes from the car's default tune.
 
-import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvg3bioj';
-import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvg3bioj';
+import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvg41vue';
+import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvg41vue';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const r1 = (v) => Math.round(v * 10) / 10;
@@ -70,6 +70,9 @@ export function forzaTune(input) {
   const aero = car ? hasPart(car, 'aero') : (input.aero ?? cls.tier >= 2);
   const tier = cls.tier; // 0..3
   const long = length === 'long';
+  // Forgiving (default): stable and predictable, built around Normal steering and Sport stability control.
+  // Sharp: the more pointy, faster setup for drivers who run with fewer assists.
+  const easy = input.feel !== 'sharp';
 
   const sections = [];
   const notes = [];
@@ -100,6 +103,7 @@ export function forzaTune(input) {
   if (dt === 'fwd') { tf = -0.1; tr = -0.1; }
   if (dt === 'rwd') { tr = 0.1; }
   if (wet && dt !== 'fwd') tr += 0.1;
+  if (easy) { if (dt === 'fwd') { tf = 0.0; tr = 0.0; } else tr = Math.max(tr, 0.1); } // calmer: rear toe-in steadies a RWD/AWD car; a FWD car keeps neutral rear toe so it still turns
   const caster = track.speed >= 3 ? 6.0 : 5.5;
   sections.push({
     title: 'Alignment',
@@ -119,6 +123,7 @@ export function forzaTune(input) {
   af += tierAdj; ar += tierAdj;
   af -= track.bumps * 3; ar -= track.bumps * 3;
   if (wet) { af -= 4; ar -= 4; }
+  if (easy) { af -= 2; ar -= dt === 'fwd' ? 0 : 3; } // softer = more grip and a calmer car
   const fp = car?.frontPct;
   if (fp >= 56) { af -= 2; ar += 2; }
   if (fp && fp <= 46) { af += 2; ar -= 2; }
@@ -152,6 +157,7 @@ export function forzaTune(input) {
   let bp = rb * 0.6;
   rb -= track.bumps; bp -= track.bumps;
   if (wet) { rb -= 1; bp -= 1; }
+  if (easy) { rb -= 0.5; bp -= 0.3; }
   const rbf = clamp(r1(rb), 1, 20), rbr = clamp(r1(dt === 'fwd' ? rb + 0.5 : rb - 0.5), 1, 20);
   const bpf = clamp(r1(bp), 1, 20), bpr = clamp(r1(dt === 'fwd' ? bp + 0.3 : bp - 0.3), 1, 20);
   sections.push({
@@ -186,6 +192,7 @@ export function forzaTune(input) {
   if (aero) {
     let lvl = { 1: 95, 2: 70, 3: 50, 4: 25 }[track.speed];
     if (wet) lvl = Math.min(100, lvl + 20);
+    if (easy) lvl = Math.min(100, lvl + 10); // grip and stability over top speed
     let f = lvl, rr = lvl;
     if (dt === 'fwd') f = Math.min(100, lvl + 10);
     if (dt === 'rwd') rr = Math.min(100, lvl + 10);
@@ -205,6 +212,7 @@ export function forzaTune(input) {
   // ---------------- Brakes ----------------
   let bal = { fwd: 50, rwd: 52, awd: 51 }[dt];
   if (wet) bal += 1;
+  if (easy && dt !== 'fwd') bal += 1; // a touch more front bias keeps the rear planted
   sections.push({
     title: 'Brakes',
     rows: [
@@ -217,8 +225,8 @@ export function forzaTune(input) {
   const slow = track.speed === 1;
   const diffRows = [];
   const adj = (v) => clamp(Math.round(v), 0, 100);
-  const accAdj = (slow ? -10 : 0) + (wet ? -10 : 0) + (long && wear ? -5 : 0);
-  const decAdj = wet ? 5 : 0;
+  const accAdj = (slow ? -10 : 0) + (wet ? -10 : 0) + (long && wear ? -5 : 0) + (easy ? -10 : 0);
+  const decAdj = (wet ? 5 : 0) + (easy ? 5 : 0);
   if (dt === 'fwd') {
     diffRows.push({ key: 'dfa', cmp: abs(adj(28 + accAdj * 0.5), 0, '%'), label: 'Front acceleration', value: `${adj(28 + accAdj * 0.5)}%`, why: 'Low lock stops the car pushing wide on exit.' });
     diffRows.push({ key: 'dfd', cmp: abs(adj(10 + decAdj), 0, '%'), label: 'Front deceleration', value: `${adj(10 + decAdj)}%` });
@@ -263,6 +271,9 @@ export function forzaTune(input) {
 
   // ---------------- Notes ----------------
   notes.unshift(track.note);
+  notes.splice(1, 0, easy
+    ? 'Forgiving: built to work with Normal steering, Sport stability and Sport traction control. Stable on the brakes and on the power, for clean laps. Switch to Sharp once you want more speed.'
+    : 'Sharp: pointier and faster, for driving with Simulation steering and stability control off. Less forgiving of mistakes.');
   if (car && !carCls) notes.push(`Add a PI for ${car.name} in the Garage so the tune uses the right class. Using ${cls.id} class for now.`);
   if (car && ['stock', 'street', 'sport'].includes(car.tyre)) notes.push(`${TYRES.find((t) => t.id === car.tyre).label} tyres overheat sooner than race tyres. Aim for the low end of the hot pressure target.`);
   if (tier === 0) notes.push('Low classes often have few tuning options. Tyres, pressures and alignment matter most.');
@@ -296,13 +307,12 @@ export function forzaFix(issue, drivetrain = 'rwd') {
   const fwd = drivetrain === 'fwd', awd = drivetrain === 'awd';
   const F = {
     'us-entry': [
-      'First check Settings, Driving Assists: Steering on Simulation and Stability control Off. Normal steering and stability control both add understeer on a wheel.',
       'Soften the front anti-roll bar by 2–3.',
       'Move brake balance 1% toward the rear.',
       fwd ? 'Add front toe-out: 0.1° more.' : 'Lower deceleration diff lock by 5%.',
     ],
     'us-mid': [
-      'First check Settings, Driving Assists: Steering on Simulation and Stability control Off. Normal steering and stability control both add understeer on a wheel.',
+      'Turn in smoothly and a little later. Normal steering holds back a sudden, big input, which feels like understeer.',
       'Soften the front anti-roll bar by 2–3, or stiffen the rear by 2–3.',
       'Add 0.2° more negative front camber.',
       'If the car has aero, add front downforce.',

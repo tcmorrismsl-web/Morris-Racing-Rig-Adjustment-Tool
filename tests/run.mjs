@@ -11,8 +11,8 @@ const bad = (s) => /NaN|undefined|null|Infinity/.test(s);
 
 for (const t of FORZA_TRACKS) for (const c of FORZA_CLASSES) for (const d of DRIVETRAINS)
   for (const weather of ['dry', 'wet']) for (const time of ['day', 'night']) for (const temp of ['cool', 'mild', 'hot'])
-    for (const length of ['sprint', 'medium', 'long']) for (const tyreWear of [true, false]) for (const aero of [true, false]) {
-      const r = forzaTune({ track: t.id, cls: c.id, drivetrain: d.id, weather, time, temp, length, tyreWear, aero, fuel: true });
+    for (const length of ['sprint', 'medium', 'long']) for (const tyreWear of [true, false]) for (const aero of [true, false]) for (const feel of ['forgiving', 'sharp']) {
+      const r = forzaTune({ track: t.id, cls: c.id, drivetrain: d.id, weather, time, temp, length, tyreWear, aero, fuel: true, feel });
       assert.equal(r.track.id, t.id);
       for (const s of r.sections) for (const row of s.rows) {
         assert.ok(row.value && !bad(row.value), `Forza ${t.id} ${c.id} ${s.title}/${row.label}: ${row.value}`);
@@ -54,6 +54,10 @@ assert.ok(dry.v.frontWing > monza.v.frontWing, 'Monaco should run more wing than
 const wet = f1Setup({ era: 2025, track: 'monaco', session: 'race', weather: 'wet', style: 'balanced' });
 assert.ok(wet.v.diffOn < dry.v.diffOn, 'Wet should lower on-throttle diff');
 const fuj = forzaTune({ track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'long', tyreWear: true, aero: true });
+const diffOf = (r) => Number(r.sections.find((s) => s.title === 'Differential').rows[0].value.replace('%', ''));
+const easyR = forzaTune({ track: 'spa', cls: 'S', drivetrain: 'rwd', weather: 'dry', time: 'day', temp: 'mild', length: 'medium' });
+const sharpR = forzaTune({ track: 'spa', cls: 'S', drivetrain: 'rwd', weather: 'dry', time: 'day', temp: 'mild', length: 'medium', feel: 'sharp' });
+assert.ok(diffOf(easyR) < diffOf(sharpR), 'Forgiving should lock the diff less on power');
 const arbs = fuj.sections.find((s) => s.title === 'Anti-roll bars').rows.map((r) => Number(r.value));
 assert.ok(arbs[1] > arbs[0], 'FWD rear ARB should be stiffer than front');
 

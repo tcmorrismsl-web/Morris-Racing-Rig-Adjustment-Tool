@@ -1,20 +1,20 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg3bioj';
-import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg3bioj';
-import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg3bioj';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg3bioj';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg3bioj';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg3bioj';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg41vue';
+import { forzaTune, forzaFix, compareValue, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg41vue';
+import { f1Setup, f1Fix, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg41vue';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg41vue';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg41vue';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg41vue';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 19, 10:54 PM'; // set by npm run stamp
+const APP_VERSION = 'Oct 19, 11:15 PM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
   tab: 'wheel',
   wheelSetFor: null,
-  forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', tyreWear: true, fuel: false, aero: true, compare: false },
+  forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', tyreWear: true, fuel: false, aero: true, compare: false, feel: 'forgiving' },
   f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced' },
   saved: [],
   current: {}, // values in the game now, per garage car ('_any' when no car is picked)
@@ -196,6 +196,7 @@ function renderForza() {
       ${field('Track', `<select data-field="track">${FORZA_TRACKS.map((t) => `<option value="${t.id}"${t.id === f.track ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select>`, true)}
       ${carPI ? '' : field(`Class (${FORZA_CLASSES.find((c) => c.id === f.cls).range} PI)`, seg('cls', cls, f.cls), true)}
       ${car ? '' : field('Drivetrain', seg('drivetrain', DRIVETRAINS, f.drivetrain))}
+      ${field('Driving feel', seg('feel', [{ id: 'forgiving', label: 'Forgiving' }, { id: 'sharp', label: 'Sharp' }], f.feel), true)}
       ${field('Weather', seg('weather', [{ id: 'dry', label: 'Dry' }, { id: 'wet', label: 'Wet' }], f.weather))}
       ${field('Time of day', seg('time', [{ id: 'day', label: 'Day' }, { id: 'night', label: 'Night' }], f.time))}
       ${field('Temperature', seg('temp', [{ id: 'cool', label: 'Cool' }, { id: 'mild', label: 'Mild' }, { id: 'hot', label: 'Hot' }], f.temp))}
@@ -299,7 +300,7 @@ function saveCurrent() {
     const f = state.forza;
     state.saved.unshift({
       id, game: 'forza', name: name.trim() || def,
-      sub: `${res.track.name}, ${car ? `${car.name}, ` : ''}${res.cls.id} class ${dtLabel(res.drivetrain)}, ${f.weather}, ${f.time}`,
+      sub: `${res.track.name}, ${car ? `${car.name}, ` : ''}${res.cls.id} class ${dtLabel(res.drivetrain)}, ${f.feel === 'sharp' ? 'sharp' : 'forgiving'}, ${f.weather}, ${f.time}`,
       inputs: { ...f },
       rows: res.sections.flatMap((s) => s.rows.map((r) => [`${s.title}: ${r.label}`, r.value])),
     });
