@@ -6,7 +6,7 @@
 // she gets; flirt at a busy moment and she'll brush you off and send you back to driving.
 // Without a key she has a set of replies. The key stays on this device and only goes to OpenAI.
 
-import * as voice from './voice.js?v=mvhlfowh';
+import * as voice from './voice.js?v=mvi7diek';
 
 const MODELS = ['gpt-4.1-mini', 'gpt-4o-mini', 'gpt-4.1-nano']; // tried in order if one isn't available
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -63,7 +63,13 @@ export function raceContext(d) {
       if (s.race) { ctx.carAhead = ahead ? `${ahead.name}, ${(me.gapAheadMs / 1000).toFixed(1)} s` : null; ctx.carBehind = behind ? `${behind.name}, ${((behind.gapAheadMs || 0) / 1000).toFixed(1)} s` : null; }
     }
     if (e.leave && !e.leave.out) ctx.garage = { nextCleanGapS: e.leave.waitS, mustLeaveWithinS: e.leave.leaveByS, holding: !!e.leave.muted };
-    if (d.parcFerme?.on) ctx.parcFerme = 'on: only the front wing can change';
+    // Parc fermé locks the setup screen, not the wheel: be explicit so she never refuses wheel changes.
+    if (d.parcFerme?.on) ctx.parcFerme = 'ON. Setup screen locked except the front wing. Still allowed on track from the wheel/MFD: brake bias, on-throttle differential, ERS mode. Give those suggestions freely.';
+    else ctx.parcFerme = 'off';
+    const items = (d.adjust?.items || []).map((x) => `${x.title}: ${x.text}`);
+    if (items.length) ctx.wheelChangesNow = items;
+    if (wheelTargets) ctx.setupSheetForThisTrack = wheelTargets;
+    if (e.lossText) ctx.lastLapCoaching = e.lossText;
   } else if (d.timing) {
     ctx.lastLap = d.timing.lastS ? fmtLap(d.timing.lastS * 1000) : null; ctx.bestLap = d.timing.bestS ? fmtLap(d.timing.bestS * 1000) : null;
   }
@@ -71,6 +77,10 @@ export function raceContext(d) {
   ctx.recentRadio = voice.transcript.slice(0, 4).map((t) => t.text).reverse();
   return ctx;
 }
+
+// The app's suggested brake bias and diff for this session (set by the dashboard).
+let wheelTargets = null;
+export function setWheelTargets(t) { wheelTargets = t; }
 
 // How warm she is: good driving and flirting raise it, mistakes cool it. 0 to 5.
 let flirts = 0;
@@ -101,6 +111,7 @@ function systemPrompt(ctx) {
     'Dismissals: when he flirts during green-flag racing or right after a mistake, often give a flirtatious brush-off that sends him back to driving, and vary it. On the grid, in the garage, under a safety car or after the flag you can play along more.',
     'Mistakes: you keep score only as flirting, a reminder of what he gets later by driving well. Never threaten or scold harshly.',
     'Facts: use only the race data below. Never invent gaps, positions, lap times or weather. If he asks for something a topic covers, set "ask" to it and keep "say" to a few words or empty; the data answer follows on the radio.',
+    'Wheel changes: brake bias, on-throttle diff and ERS mode can always be changed from the wheel while driving, parc fermé or not. When he asks what to change, use wheelChangesNow, setupSheetForThisTrack and lastLapCoaching, naming corners (Turn 4) rather than sectors.',
     'Topics: gaps, pit (pit plan, or the gap to leave the garage), time (where he is losing time), weather, tyres (tyres and fuel), plan (race plan), wait (he will hold in the garage), yes and no (answers to your waiting question), repeat.',
     'Answer as JSON only: {"say": "...", "ask": null or a topic, "flirt": true if he was flirting}.',
     `Race data now: ${JSON.stringify(ctx)}${busyNow(ctx) ? ' (green-flag racing: keep it short)' : ''}`,
@@ -116,7 +127,7 @@ async function askOpenAI(text, ctx) {
       method: 'POST',
       headers: { Authorization: `Bearer ${voice.settings.okey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model, temperature: 0.9, max_tokens: 150, response_format: { type: 'json_object' },
+        model, temperature: 0.9, max_tokens: 110, response_format: { type: 'json_object' },
         messages: [{ role: 'system', content: systemPrompt(ctx) }, ...history.slice(-12), { role: 'user', content: text }],
       }),
     });

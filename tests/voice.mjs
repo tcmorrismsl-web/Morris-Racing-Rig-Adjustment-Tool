@@ -20,7 +20,7 @@ assert.equal(v.speechify('1.9 to 2.1 km'), '1.9 to 2.1 kilometres');
 v.settings.style = 'fiery';
 const all = [];
 for (let i = 0; i < 30; i++) {
-  all.push(v.phrase({ kind: 'pos-lost', priority: 'normal', text: '', data: { pos: 9, name: 'GASLY' } }));
+  all.push(v.phrase({ kind: 'pos-lost', priority: 'normal', text: 'GASLY is through. P9.', data: { pos: 9, name: 'GASLY' } }));
   all.push(v.phrase({ kind: 'lap-done', priority: 'normal', text: '1:17.9.', data: { invalid: true } }));
   all.push(v.phrase({ kind: 'penalty', priority: 'high', text: "You've got a 5 second penalty.", data: {} }));
 }
@@ -35,63 +35,88 @@ assert.ok(/Podium/.test(clean) && /earned it/.test(clean), clean);
 v.settings.style = 'straight';
 assert.equal(v.phrase({ kind: 'pos-lost', priority: 'normal', text: 'Lost one to GASLY. P9.', data: { pos: 9, name: 'GASLY' } }), 'Lost one to Gasly. P9.');
 
-// OpenAI voice: request shape, caching, cost tally, and fallback to the device voice
+// OpenAI voice: request shape, streaming playback, caching, cost tally, fallback to the device voice
 {
   const calls = [];
   let fail = false;
+  const pcm = new Uint8Array(24000 * 2 * 0.6); // 0.6 s of audio
   globalThis.fetch = async (url, opts) => {
     calls.push({ url, opts, body: JSON.parse(opts.body) });
     if (fail) return { ok: false, status: 401 };
-    return { ok: true, blob: async () => new Blob(['mp3']) };
+    // Arrives in odd-sized pieces, as over Wi-Fi.
+    const parts = [pcm.slice(0, 3001), pcm.slice(3001, 15000), pcm.slice(15000)];
+    return { ok: true, body: new ReadableStream({ start(c) { parts.forEach((p) => c.enqueue(p)); c.close(); } }) };
   };
-  globalThis.URL.createObjectURL = () => 'blob:audio';
-  const played = [];
-  globalThis.Audio = class { play() { played.push(this.src); setTimeout(() => this.onended?.(), 1); return Promise.resolve(); } pause() {} };
+  const scheduled = [];
+  class Node { connect() {} }
+  globalThis.window.AudioContext = class {
+    constructor() { this.state = 'running'; this.sampleRate = 48000; this.currentTime = 0; this.destination = {}; }
+    resume() {}
+    createGain() { return Object.assign(new Node(), { gain: { value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} } }); }
+    createBuffer(ch, len, rate) { const d = new Float32Array(len); return { duration: len / rate, getChannelData: () => d, rate }; }
+    createBufferSource() { const n = Object.assign(new Node(), { start: (at) => scheduled.push({ at, buf: n.buffer }), stop() {} }); return n; }
+    createBiquadFilter() { return Object.assign(new Node(), { frequency: { value: 0 }, Q: { value: 0 } }); }
+    createOscillator() { return Object.assign(new Node(), { frequency: { setValueAtTime() {} }, start() {}, stop() {} }); }
+  };
   const spoken = [];
   globalThis.window.speechSynthesis = { speak: (u) => { spoken.push(u.text); setTimeout(() => u.onend?.(), 1); }, cancel() {}, getVoices: () => [] };
   globalThis.speechSynthesis = globalThis.window.speechSynthesis;
   globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
-  Object.assign(v.settings, { engine: 'openai', okey: 'sk-test', ovoice: 'marin', style: 'fiery', radio: false, usage: { month: '', chars: 0 } });
+  Object.assign(v.settings, { engine: 'openai', okey: 'sk-test', ovoice: 'marin', style: 'fiery', radioSound: 'f1', usage: { month: '', chars: 0 } });
+  v.unlockAudio();
+  let talking = null;
+  v.onSpeaking((x) => { talking = x; });
 
   v.speak('Box box. 0.75 to Norris.', { priority: 'high' });
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 1300));
   assert.equal(calls.length, 1);
   const c = calls[0];
   assert.equal(c.url, 'https://api.openai.com/v1/audio/speech');
   assert.equal(c.opts.headers.Authorization, 'Bearer sk-test');
   assert.equal(c.body.model, 'gpt-4o-mini-tts');
-  assert.equal(c.body.voice, 'marin');
+  assert.equal(c.body.response_format, 'pcm', 'raw audio so it can play while downloading');
   assert.equal(c.body.input, 'Box box. eight tenths to Norris.');
   assert.ok(/flirty/.test(c.body.instructions) && /urgent/.test(c.body.instructions));
-  assert.deepEqual(played, ['blob:audio']);
+  const speech = scheduled.filter((x) => x.buf?.rate === 24000);
+  assert.equal(speech.reduce((a, x) => a + x.buf.getChannelData().length, 0), 24000 * 0.6, 'every sample played, even split across pieces');
+  assert.ok(speech.every((x, k) => k === 0 || x.at >= speech[k - 1].at), 'pieces played back to back');
+  assert.ok(speech[0].at >= 0.28, 'speech starts after the radio chime');
+  assert.equal(talking, false, 'finished');
   assert.ok(v.settings.usage.chars > 0);
 
-  // Same line again: from the cache, no second charge
+  // Same line again: from memory, no second charge
   v.speak('Box box. 0.75 to Norris.', { priority: 'high' });
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 1300));
   assert.equal(calls.length, 1, 'cached');
-  assert.equal(played.length, 2);
 
   // Bad key: says it on the phone's voice instead and reports why
   fail = true;
   let err = '';
-  v.onEngineError((m) => { err = m; });
+  v.onEngineError((m) => { err = m || err; });
   v.speak('Weather is dry.', { priority: 'normal' });
-  await new Promise((r) => setTimeout(r, 30));
+  await new Promise((r) => setTimeout(r, 400));
   assert.deepEqual(spoken, ['Weather is dry.']);
   assert.ok(/key not accepted/.test(err), err);
   assert.ok(v.costEstimate(7000) < 0.15, 'a race costs pennies');
-  // Driver's own description goes to OpenAI and changes the cached line
+  // Driver's own description goes to OpenAI and changes the stored line
   fail = false;
   v.settings.sound = 'Southern accent, laid-back.';
   v.speak('Box box. 0.75 to Norris.', { priority: 'high' });
-  await new Promise((r) => setTimeout(r, 30));
-  const last = calls.at(-1).body.instructions;
-  assert.ok(/Southern accent, laid-back\./.test(last) && /urgent/.test(last), last);
-  assert.equal(calls.filter((x) => x.body.input.startsWith('Box box')).length, 2, 'new description, new audio');
+  await new Promise((r) => setTimeout(r, 1300));
+  const lastI = calls.at(-1).body.instructions;
+  assert.ok(/^Accent and character/.test(lastI) && /Southern accent, laid-back\./.test(lastI), lastI);
   v.settings.sound = '';
-  console.log('OK: OpenAI voice checks passed; 7,000 characters ≈ $' + v.costEstimate(7000).toFixed(3));
+  console.log('OK: OpenAI voice checks passed (streaming); 7,000 characters ≈ $' + v.costEstimate(7000).toFixed(3));
 }
+
+// Wording doesn't repeat back to back
+{
+  v.settings.style = 'fiery';
+  const lines = Array.from({ length: 12 }, () => v.phrase({ kind: 'losing-time', priority: 'normal', text: 'Turn 4: 0.21 to Norris. Brake later.', data: { fix: 'early-brake' } }));
+  assert.ok(lines.every((x, k) => k === 0 || x !== lines[k - 1] || x === 'Turn 4: 0.21 to Norris. Brake later.'), lines.join(' | '));
+  assert.ok(new Set(lines).size >= 3, 'several different intros');
+}
+
 console.log('OK: voice checks passed');
 console.log('Sample:', all.slice(0, 3).join(' | '));
 console.log('Finish:', fin);

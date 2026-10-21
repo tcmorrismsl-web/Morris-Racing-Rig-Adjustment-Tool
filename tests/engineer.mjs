@@ -31,7 +31,14 @@ function track(race) {
   const find = (k) => all.filter((c) => c.kind === k);
   assert.ok(kinds.includes('session'), 'radio check');
   const splits = find('splits');
-  assert.ok(splits.length >= 6, `splits each lap (${splits.length})`);
+  assert.ok(splits.length >= 3, `gap updates (${splits.length})`);
+  // Variety: several kinds of talking point, and no line said twice in a row.
+  const topics = new Set(all.map((c) => c.kind).filter((k) => ['splits', 'battle-ahead', 'battle-behind', 'teammate', 'overview', 'tyres-rival', 'losing-time', 'sector', 'ers', 'rival-pit', 'battle-pass'].includes(k)));
+  assert.ok(topics.size >= 5, `talking points: ${[...topics]}`);
+  const texts = all.map((c) => c.text);
+  assert.ok(texts.every((x, k) => k === 0 || x !== texts[k - 1]), 'no repeated line back to back');
+  const coachCorners = all.filter((c) => c.kind === 'losing-time').map((c) => c.data.corner);
+  assert.ok(coachCorners.every((x, k) => k < 2 || !(x === coachCorners[k - 1] && x === coachCorners[k - 2])), `corner coaching moves around: ${coachCorners}`);
   assert.ok(splits.some((c) => c.data.ahead && c.data.behind && c.data.lapsLeft), 'splits carry car ahead/behind and laps left');
   assert.ok(splits.some((c) => c.data.ahead?.changeMs !== null && c.data.ahead?.changeMs !== undefined), 'gap trends after a lap');
   const answeredGaps = all.find((c) => c.kind === 'splits' && c.priority === 'high');
@@ -43,14 +50,14 @@ function track(race) {
   assert.ok(find('rain-coming').length >= 1, 'rain forecast called');
   const loss = find('losing-time');
   assert.ok(loss.length >= 1, 'losing time called');
-  assert.ok(loss.some((c) => c.data.fromKm >= 1.7 && c.data.toKm <= 2.6), `pinpoints the slow zone: ${loss.map((c) => c.text).join(' | ')}`);
-  assert.ok(loss[0].text.includes('sector 2'), 'sector named');
+  assert.ok(loss.some((c) => c.data.from <= 2150 && c.data.to >= 2100), `pinpoints the slow corner: ${loss.map((c) => `${c.data.corner} ${c.data.from}-${c.data.to}`).join(' | ')}`);
+  assert.ok(loss.every((c) => /Turns? \d/.test(c.text)) && loss.every((c) => !/sector \d/.test(c.text)), 'corner numbers, not sectors');
   assert.ok(find('adjust').some((c) => /Brake bias back 1%/.test(c.text)), 'wheel change called (brake bias)');
   assert.ok(!all.some((c) => /°C\)/.test(c.text) && c.kind === 'adjust'), 'no tyre temperature adjustments');
   assert.ok(find('pit-soon').length === 1 && find('box-ask').length === 1, 'pit window calls once each');
   const st = race.state();
-  assert.equal(st.engineer.segments, 20);
-  assert.ok(Array.isArray(st.engineer.segLoss) && st.engineer.segLoss.length === 20, 'map gets per-sector losses');
+  assert.equal(st.engineer.segments, st.engineer.zones.length, 'one loss value per corner zone');
+  assert.ok(Array.isArray(st.engineer.segLoss) && st.engineer.segLoss.length === st.engineer.zones.length && st.engineer.zones[0].name === 'Turn 1', 'map gets per-corner losses');
   assert.equal(st.adjust.mode, 'track');
   assert.ok(st.adjust.items.every((x) => !/hot|cold/i.test(x.title)), 'adjust panel has no tyre temps');
   // Ask from the phone
@@ -78,7 +85,7 @@ function track(race) {
   if (lw) assert.ok(lw.data.seconds > 0 && lw.data.seconds <= 90);
   assert.ok(all.filter((c) => c.kind === 'lap-done').length >= 2, 'lap times called');
   const loss = all.filter((c) => c.kind === 'losing-time');
-  assert.ok(loss.some((c) => c.data.fromKm >= 2.7 && c.data.toKm <= 3.6), `qualifying loss located: ${loss.map((c) => c.text).join(' | ')}`);
+  assert.ok(loss.some((c) => c.data.from <= 3150 && c.data.to >= 3100), `qualifying loss located: ${loss.map((c) => c.text).join(' | ')}`);
   assert.ok(loss[0].data.ref && loss[0].data.ref !== 'your best lap', 'compared with the fastest car');
   assert.ok(/P\d/.test(race.eng.ask('gaps').text));
 }
@@ -147,6 +154,36 @@ for (const answer of [null, 'wait']) {
   assert.ok(!pf(15, [15]).on, 'race-only weekend is open');
   const off = new F1Race(store()); off.session = { sessionType: 15, parcFermeRules: false, weekend: [5, 15] };
   assert.ok(!off.parcFerme().on, 'rules off in the game');
+}
+
+// ---------------- Corner coaching from telemetry ----------------
+{
+  const { Coach } = require('../bridge/coach.js');
+  const coach = new Coach();
+  coach.setTrack('austria', 17, 4318);
+  const z = coach.zones.find((x) => x.name === 'Turn 3');
+  const drive = (lapNum, brakeAt, apexSpeed, ers) => {
+    let t = 0;
+    for (let d = 0; d < 4318; d += 5) {
+      const inBrake = d >= z.apex - brakeAt && d < z.apex;
+      const near = Math.abs(d - z.apex) < 40;
+      const v = near ? apexSpeed : inBrake ? 150 : 280;
+      t += (5 / (v / 3.6)) * 1000;
+      coach.sample(lapNum, d, Math.round(t), { speedKmh: v, throttle: inBrake || near ? 0 : 1, brake: inBrake ? 0.9 : 0, gear: near ? 3 : 7 }, ers(d));
+    }
+    return coach.lapDone(lapNum, Math.round(t), false);
+  };
+  drive(1, 100, 95, () => 2e6);
+  const r2 = drive(2, 125, 88, (d) => 2e6 - d * 200);
+  const k = coach.zones.indexOf(z);
+  const adv = coach.advise(k, r2.lap, r2.prevBest);
+  assert.ok(adv && /braked [23]\d m earlier than your best lap/.test(adv.text) && /7 km\/h slower at the apex/.test(adv.text), adv?.text);
+  assert.ok(/Brake later, about \d+ m before the apex/.test(adv.fix), adv.fix);
+  const e = coach.ers(r2.lap);
+  assert.ok(e && e.end < e.start && e.longest && /the run from Turn \d+ to Turn \d+/.test(e.longest.name), JSON.stringify(e));
+  // Reverse layouts don't use real corner numbers.
+  const rev = new Coach(); rev.setTrack('austria', 40, 4318);
+  assert.ok(!rev.state().named && /km mark/.test(rev.zones[0].name));
 }
 
 // ---------------- Forza ----------------

@@ -5,7 +5,7 @@
 
 const STORE = 'mr-engineer';
 const defaults = { v: 2, on: false, style: 'fiery', chat: 'normal', voice: '', name: '', rate: 1, volume: 1, radio: true,
-  engine: 'device', okey: '', ovoice: 'marin', sound: '', usage: { month: '', chars: 0 } };
+  engine: 'device', okey: '', ovoice: 'marin', sound: '', radioSound: 'f1', usage: { month: '', chars: 0 } };
 export const settings = (() => {
   let s;
   try { s = { ...defaults, ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch { s = { ...defaults }; }
@@ -66,33 +66,46 @@ const tally = () => (mistakes === 0 ? ''
       : pick([` That's ${mistakes}. You're going to have to work a lot harder to impress me tonight.`, ` ${mistakes} on your tab. Clean laps from here and I'll forget all about it.`]));
 const reward = () => pick([' Keep driving like that and you know what you get.', " That's how you earn it.", ' Mm, keep that up for me.']);
 
+// Wording picks: never the same one twice until the others have been used, and the little
+// extras only some of the time, so the radio doesn't sound like a loop.
+const recentPicks = {};
+function fresh(key, arr) {
+  const used = recentPicks[key] || (recentPicks[key] = []);
+  const idx = arr.map((_, i) => i).filter((i) => !used.includes(i));
+  const i = (idx.length ? idx : arr.map((_, k) => k))[Math.floor(Math.random() * (idx.length || arr.length))];
+  used.push(i);
+  while (used.length > Math.max(1, arr.length - 1)) used.shift();
+  return arr[i];
+}
+const maybe = (key, arr, p = 0.5) => (Math.random() < p ? fresh(key, arr) : '');
+
 const FIERY = {
-  session: () => pick([`Hey ${pet()}! Radio check, I've got you loud and clear. Let's go have some fun.`, `There you are, ${pet()}. I'm on the radio all session. Make me proud.`]),
-  splits: (c) => `${pick(['Okay! ', 'Right, ', `Listen up, ${pet()}. `, ''])}${c.text} ${c.data?.ahead?.changeMs < -50 ? pick(['Reel him in!', 'Hunt him down!', "He's yours."]) : c.data?.behind?.changeMs < -50 ? pick(["Don't you dare let him by.", 'He is coming. Push!']) : pick(['Keep it smooth.', 'Love the pace.', ''])}`,
-  'losing-time': (c) => { const n = c.data?.fix === 'lockup' ? strike() : mistakes; return `${pick(['I saw that. ', 'Hey. Focus. ', `Oh ${pet()}. `])}${c.text}${c.data?.fix === 'lockup' && n >= 2 ? tally() : ''}`; },
+  session: () => fresh('f-session', [`Hey ${pet()}! Radio check, I've got you loud and clear. Let's go have some fun.`, `There you are, ${pet()}. I'm on the radio all session. Make me proud.`, `Radio check. Hi, ${pet()}. Ready when you are.`]),
+  splits: (c) => `${maybe('f-si', ['Okay. ', 'Right, ', `Listen, ${pet()}. `, 'Gaps. ', 'Update. '], 0.4)}${c.text}${c.data?.ahead?.changeMs < -200 ? ` ${fresh('f-sa', ['Reel him in!', "He's yours.", 'Keep chipping away.', 'Lovely.'])}` : c.data?.behind?.changeMs < -200 ? ` ${fresh('f-sb', ["Don't you dare let him by.", 'Push, he is coming.', 'Tidy laps now.'])}` : maybe('f-sx', [' Keep it smooth.', ' Love the pace.', ' Looking good.'], 0.3)}`,
+  'losing-time': (c) => { const n = c.data?.fix === 'lockup' ? strike() : mistakes; return `${maybe('f-li', ['Quick one. ', `Okay ${pet()}, `, 'Little tip. ', "Here's some time for you. ", 'Listen. '], 0.45)}${c.text}${c.data?.fix === 'lockup' && n >= 2 ? tally() : ''}`; },
   'lap-done': (c) => {
-    if (c.data?.invalid) { strike(); return `${pick(['Lap deleted, track limits!', 'Track limits. Deleted.'])}${tally()}`; }
-    if (c.data?.delta < 0) return `${pick(['Yes! Personal best!', 'Oh, purple! Personal best!', 'That is a personal best!'])} ${c.text.replace(/, personal best by.*?\./, '.')} ${pick(['More of that, please.', 'I could kiss you.', "That's my driver."])}${reward()}`;
-    return `${c.text} ${pick(['Good lap.', 'Keep stacking them.', ''])}`;
+    if (c.data?.invalid) { strike(); return `${fresh('f-inv', ['Track limits, lap deleted!', 'Ooh, deleted. Track limits.', "That one's gone, track limits."])}${tally()}`; }
+    if (c.data?.delta < 0) return `${fresh('f-pb', ['Yes! ', 'Oh, nice! ', 'There it is! ', 'Mm, ', 'Beautiful! ', ''])}${c.text} ${maybe('f-pb2', ['More of that, please.', 'I could kiss you.', "That's my driver.", 'Keep going.', 'Gorgeous lap.'], 0.6)}${maybe('f-rw', [' Keep driving like that and you know what you get.', " That's how you earn it.", ' Mm, keep that up for me.'], 0.35)}`;
+    return `${c.text}${maybe('f-ld', [' Keep stacking them.', ' Next one.', ' Build on it.'], 0.3)}`;
   },
-  'pos-gain': (c) => `${pick(['Yes!', 'Oh yes!', 'Beautiful!'])} P${c.data.pos}${c.data.name ? `, goodbye ${name(c.data.name)}` : ''}! ${pick(["That's my driver.", 'I love it.', 'Do it again.'])}${reward()}`,
-  'pos-lost': (c) => { strike(); return `${c.data.name ? `Did you just let ${name(c.data.name)} through?` : 'We just lost a place.'} P${c.data.pos}. ${pick(['Go get it back if you want my attention.', 'Get it back for me. Now.'])}${tally()}`; },
-  'leave-go': (c) => (c.ask ? `${pick([`Gap at pit exit, ${pet()}!`, 'Clean air at pit exit!'])}${c.data?.clearForS ? ` Clear for about ${Math.min(60, c.data.clearForS)} seconds.` : ''} Going?` : `Track's clear, ${pet()}. Go whenever you like.`),
-  briefing: (c) => `${c.text} ${pick(["Now go make me proud. I'll be right here in your ear.", "Drive it clean and I'll be very, very happy with you."])}`,
-  formation: (c) => `${c.text} Get those tyres nice and hot for me.`,
-  lights: () => pick(['Lights out! Go, go, go!', 'Lights out, babe! Go!']),
+  'pos-gain': (c) => `${fresh('f-g1', ['Yes! ', 'Oh yes! ', 'Beautiful! ', 'Get in! ', ''])}${c.text}${maybe('f-g2', [" That's my driver.", ' I love it.', ' Do it again.', ' So good.'], 0.6)}${maybe('f-rw', [' Keep driving like that and you know what you get.', " That's how you earn it.", ' Mm, keep that up for me.'], 0.25)}`,
+  'pos-lost': (c) => { strike(); return `${c.text}${fresh('f-l2', [' Go get it back if you want my attention.', ' Get it back for me.', ' Not on my watch, get him back.', ''])}${tally()}`; },
+  'leave-go': (c) => (c.ask ? `${fresh('f-go', [`Gap at pit exit, ${pet()}!`, 'Clean air at pit exit!', "Gap's opening now!"])}${c.data?.clearForS ? ` Clear for about ${Math.min(60, c.data.clearForS)} seconds.` : ''} Going?` : `Track's clear, ${pet()}. Go whenever you like.`),
+  briefing: (c) => `${c.text} ${fresh('f-br', ["Now go make me proud. I'll be right here in your ear.", "Drive it clean and I'll be very, very happy with you.", "Let's have a good one, " + pet() + '.'])}`,
+  formation: (c) => `${c.text}${maybe('f-fm', [' Get those tyres nice and hot for me.', ' Warm them up properly.'], 0.6)}`,
+  lights: () => fresh('f-lo', ['Lights out! Go, go, go!', 'Lights out, babe! Go!', 'And go! Go, go!']),
   'parc-ferme': (c) => `${c.text} Last chance to fiddle with the car, ${pet()}.`,
-  'leave-wait': (c) => `${c.text} ${pick(['Patience, babe.', "Sit tight, I've got you."])}`,
-  'leave-by': (c) => `${c.text} Do not keep me waiting.`,
-  'box-now': (c) => `Box, box! ${pick(['Come to me.', 'Bring it in.'])} ${c.text.replace(/^Box this lap, box this lap\.\s*/, '')}`,
+  'leave-wait': (c) => `${c.text}${maybe('f-lw', [' Patience, babe.', " Sit tight, I've got you."], 0.5)}`,
+  'leave-by': (c) => `${c.text}${maybe('f-lb', [' Do not keep me waiting.', ' Tick tock.'], 0.6)}`,
+  'box-now': (c) => `Box, box! ${fresh('f-bx', ['Come to me.', 'Bring it in.', 'In you come.'])} ${c.text.replace(/^Box this lap, box this lap\.\s*/, '')}`,
   'box-ask': (c) => `${c.text} Your call, ${pet()}.`,
-  sc: (c) => (c.data?.deployed ? `${c.data.type} out! ${c.ask ? "Free pit stop, babe. Want it? Yes or no." : 'Keep your delta, keep the tyres warm.'}` : `${c.data?.type || 'Safety car'} in this lap. Get ready to fight!`),
+  sc: (c) => (c.data?.deployed ? `${c.data.type} out! ${c.ask ? 'Free pit stop, babe. Want it? Yes or no.' : 'Keep your delta, keep the tyres warm.'}` : `${c.data?.type || 'Safety car'} in this lap. Get ready to fight!`),
   'rain-coming': (c) => `${c.text} ${c.ask ? 'Yes or no, babe.' : 'Keep an eye on the sky.'}`,
   'weather-now': (c) => `${c.text}${c.data?.wetter ? ' Gentle on the throttle. Keep it on the road for me.' : ''}`,
-  attack: (c) => `Within a second of ${name(c.data.name)}! ${c.data.era >= 2026 ? 'Overtake mode is yours.' : 'DRS!'} ${pick(['Go get him!', 'Hunt him down!', 'Send it!'])}`,
-  defend: (c) => `${name(c.data.name)} is right on you. ${pick(['Hold that line!', 'Do not let him by.', 'Make yourself wide!'])}`,
-  adjust: (c) => { const lock = /Brake bias/.test(c.text); if (lock) strike(); return `${c.text} ${lock && mistakes >= 2 ? tally().trim() : pick(['Trust me.', "You'll feel it.", ''])}`; },
-  'final-lap': (c) => `Last lap! P${c.data?.pos ?? ''}! ${pick(['Bring it home clean and I might be very nice to you later.', 'Everything you have got. Make it worth my while.'])}`,
+  attack: (c) => `${c.text}${maybe('f-at', [' Go get him!', ' Send it!', ' Hunt him down!'], 0.6)}`,
+  defend: (c) => `${c.text}${maybe('f-df', [' Hold that line!', ' Make yourself wide.', ''], 0.5)}`,
+  adjust: (c) => { const lock = /Brake bias/.test(c.text); if (lock) strike(); return `${c.text}${lock && mistakes >= 2 ? ` ${tally().trim()}` : maybe('f-aj', [' Trust me.', " You'll feel it."], 0.4)}`; },
+  'final-lap': (c) => `${c.text} ${fresh('f-fl', ['Bring it home clean and I might be very nice to you later.', 'Everything you have got. Make it worth my while.', "Last one, " + pet() + ". Make it count."])}`,
   finish: (c) => {
     const p = c.data.pos;
     const verdict = p === 1 ? 'You won! You absolute legend!' : p <= 3 ? `P${p}! Podium! I am so proud of you!` : p <= 10 ? `P${p}. Points! Good job.` : `P${p}. Debrief. My office.`;
@@ -102,29 +115,37 @@ const FIERY = {
     mistakes = 0;
     return `Chequered flag! ${verdict}${tab}`;
   },
-  'fastest-lap': (c) => (c.data?.me ? `Fastest lap! ${pick(['Show-off. I love it.', 'Purple everywhere. Gorgeous.'])}` : c.text),
-  'blue-flag': () => "Blue flag. Let him by, and don't make it weird.",
-  'yellow-flag': () => 'Yellow flag! Easy, easy. No heroics.',
-  penalty: (c) => { strike(); return `${c.text} ${pick(["Seriously? You're lucky I like you.", 'Naughty.'])}${tally()}`; },
+  'fastest-lap': (c) => (c.data?.me ? `${c.text} ${fresh('f-fs', ['Show-off. I love it.', 'Purple everywhere. Gorgeous.', 'Mm, fastest of all.'])}` : c.text),
+  'blue-flag': () => fresh('f-blue', ["Blue flag. Let him by, and don't make it weird.", 'Blue flag, let the leader through.']),
+  'yellow-flag': () => fresh('f-yel', ['Yellow flag! Easy, easy. No heroics.', 'Yellows ahead, careful.']),
+  penalty: (c) => { strike(); return `${c.text} ${fresh('f-pen', ["Seriously? You're lucky I like you.", 'Naughty.', 'Tut tut.'])}${tally()}`; },
   'tyre-wear': (c) => `${c.text} Look after them for me.`,
   'fuel-short': (c) => `${c.text} Don't make me wait at the finish.`,
   'pit-soon': (c) => `${c.text} Get ready for me.`,
-  'pit-estimate': (c) => c.text,
+  sector: (c) => `${c.text}${maybe('f-sec', [' Ooh.', ' Love that.', ' Gorgeous.'], 0.6)}`,
+  'battle-ahead': (c) => `${c.text}${maybe('f-ba', [' Go play.', " Let's have them."], 0.4)}`,
+  teammate: (c) => c.text,
+  overview: (c) => `${maybe('f-ov', ['Big picture: ', 'Race update. ', ''], 0.3)}${c.text.replace(/^Race update: /, '')}`,
+  'tyres-rival': (c) => c.text,
+  ers: (c) => c.text,
+  'rival-pit': (c) => c.text,
+  'wheel-setup': (c) => `${c.text}${maybe('f-ws', [' Trust me.', ''], 0.4)}`,
+  pit: (c) => c.text,
   answer: (c) => (/^Copy/.test(c.text) ? c.text.replace(/^Copy[,.]?\s*/, `Copy, ${pet()}! `) : c.text),
 };
 
 const SULTRY = {
   session: (c) => `Hey ${pet()}. It's me on the radio. ${c.text.replace(/^Radio check\.\s*/, '')} Let's have some fun.`,
-  splits: (c) => `${pick(['', 'Mm, ', `Okay ${pet()}, `])}${c.text} ${pick(['Keep it smooth for me.', 'Looking good out there.', ''])}`,
-  'losing-time': (c) => `${pick([`Little secret, ${pet()}. `, 'Just between us. ', ''])}${c.text}`,
-  'lap-done': (c) => (c.data?.delta < 0 ? `Ooh, personal best. ${c.text} I felt that one.` : `${c.text}${c.data?.invalid ? '' : pick([' Nice.', ' Smooth.', ''])}`),
-  'pos-gain': (c) => `P${c.data.pos}. ${pick(['Oh, that was lovely', 'Mm, I liked that move'])}${c.data.name ? ` on ${name(c.data.name)}` : ''}.`,
-  'pos-lost': (c) => `${c.data.name ? `${name(c.data.name)} got by` : 'We lost one'}. P${c.data.pos}. Go get it back for me, ${pet()}.`,
+  splits: (c) => `${maybe('s-si', ['Mm, ', `Okay ${pet()}, `, ''], 0.4)}${c.text}${maybe('s-sx', [' Keep it smooth for me.', ' Looking good out there.'], 0.3)}`,
+  'losing-time': (c) => `${maybe('s-li', [`Little secret, ${pet()}. `, 'Just between us. ', 'Listen. '], 0.4)}${c.text}`,
+  'lap-done': (c) => (c.data?.delta < 0 ? `${fresh('s-pb', ['Ooh. ', 'Mm. ', ''])}${c.text}${maybe('s-pb2', [' I felt that one.', ' Lovely.'], 0.5)}` : `${c.text}${c.data?.invalid ? '' : maybe('s-ld', [' Nice.', ' Smooth.'], 0.3)}`),
+  'pos-gain': (c) => `${c.text}${maybe('s-g', [' Oh, that was lovely.', ' Mm, I liked that.'], 0.6)}`,
+  'pos-lost': (c) => `${c.text}${maybe('s-l', [` Go get it back for me, ${pet()}.`, ''], 0.6)}`,
   'leave-go': (c) => (c.ask ? `Gap at pit exit, ${pet()}.${c.data?.clearForS ? ` Clear for about ${Math.min(60, c.data.clearForS)} seconds.` : ''} Going?` : `Track's clear, ${pet()}. Whenever you're ready.`),
   briefing: (c) => `${c.text} Take your time. I'll be with you every lap.`,
   formation: (c) => `${c.text} Nice and warm for me.`,
   'box-now': (c) => `Box, box, ${pet()}. ${c.text.replace(/^Box this lap, box this lap\.\s*/, '')}`,
-  'final-lap': (c) => `Last lap, ${pet()}. P${c.data?.pos ?? ''}. Bring it home to me.`,
+  'final-lap': (c) => `${c.text} Bring it home to me.`,
   finish: (c) => `Chequered flag. P${c.data.pos}. ${c.data.pos <= 3 ? 'You were incredible out there.' : 'Come back to me in one piece.'}`,
   answer: (c) => (/^Copy/.test(c.text) ? c.text.replace(/^Copy[,.]?\s*/, `Copy, ${pet()}. `) : c.text),
 };
@@ -160,37 +181,91 @@ export function speechify(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Radio click: a short burst of static and a chirp before each call.
+// Audio: one WebAudio context, unlocked by a tap, plays the radio chime and her voice.
 // ---------------------------------------------------------------------------
 let ctx = null;
-// One audio player, unlocked by a tap, so phones let it play later without one.
-const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
-let player = null;
+let out = null; // master gain
 export function unlockAudio() {
-  try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch { ctx = null; }
-  try { if (!player) { player = new Audio(); player.preload = 'auto'; } if (!player.dataset?.unlocked) { player.src = SILENT; player.play().catch(() => {}); if (player.dataset) player.dataset.unlocked = '1'; } } catch { /* no audio element */ }
-}
-function radioClick() {
-  if (!settings.radio || !ctx) return 0;
   try {
-    const t = ctx.currentTime;
-    const out = ctx.createGain(); out.gain.value = 0.16 * settings.volume; out.connect(ctx.destination);
-    // Static
-    const len = Math.floor(ctx.sampleRate * 0.09);
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-    const noise = ctx.createBufferSource(); noise.buffer = buf;
-    const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.frequency.value = 1800; band.Q.value = 0.8;
-    noise.connect(band); band.connect(out); noise.start(t);
-    // Chirp
-    const osc = ctx.createOscillator(); const g = ctx.createGain();
-    osc.type = 'sine'; osc.frequency.setValueAtTime(1250, t + 0.07); osc.frequency.linearRampToValueAtTime(1650, t + 0.13);
-    g.gain.setValueAtTime(0, t + 0.07); g.gain.linearRampToValueAtTime(0.5, t + 0.08); g.gain.linearRampToValueAtTime(0, t + 0.15);
-    osc.connect(g); g.connect(out); osc.start(t + 0.07); osc.stop(t + 0.16);
-    return 220;
+    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') ctx.resume();
+    if (!out) { out = ctx.createGain(); out.connect(ctx.destination); }
+    // A silent blip inside the tap is what phones need to allow sound later.
+    const b = ctx.createBuffer(1, 1, ctx.sampleRate); const n = ctx.createBufferSource(); n.buffer = b; n.connect(out); n.start();
+  } catch { ctx = null; }
+}
+const audioReady = () => !!ctx && ctx.state === 'running';
+
+// Radio sounds. "f1": a broadcast-style team-radio chime, synthesised here (two bright digital
+// tones over a hiss of static). "click": the older static and chirp. "custom": your own clip.
+export const RADIO_SOUNDS = [
+  { id: 'f1', label: 'F1-style team radio chime' },
+  { id: 'click', label: 'Static click' },
+  { id: 'custom', label: 'Your own sound' },
+  { id: 'off', label: 'Off' },
+];
+const CUSTOM_KEY = 'mr-engineer-sound';
+let customBuf = null;
+export function setCustomSound(dataUrl) {
+  customBuf = null;
+  try { if (dataUrl) localStorage.setItem(CUSTOM_KEY, dataUrl); else localStorage.removeItem(CUSTOM_KEY); } catch { return false; }
+  return true;
+}
+async function loadCustom() {
+  if (customBuf || !ctx) return customBuf;
+  let url = null;
+  try { url = localStorage.getItem(CUSTOM_KEY); } catch { /* none */ }
+  if (!url) return null;
+  try { const bytes = await (await fetch(url)).arrayBuffer(); customBuf = await ctx.decodeAudioData(bytes); } catch { customBuf = null; }
+  return customBuf;
+}
+const soundSetting = () => settings.radioSound || (settings.radio === false ? 'off' : 'f1');
+
+function staticBurst(t, dur, level, freq = 1800) {
+  const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const n = ctx.createBufferSource(); n.buffer = buf;
+  const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.frequency.value = freq; band.Q.value = 0.9;
+  const g = ctx.createGain(); g.gain.value = level;
+  n.connect(band); band.connect(g); g.connect(out); n.start(t);
+}
+function tone(t, f, dur, level, type = 'square') {
+  const o = ctx.createOscillator(); const g = ctx.createGain();
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 5200;
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t + 0.006); g.gain.setValueAtTime(level, t + dur * 0.55); g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+  o.connect(lp); lp.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 0.02);
+}
+// Plays the chime and returns how long until speech should start (ms).
+function radioChime() {
+  const kind = soundSetting();
+  if (kind === 'off' || !audioReady()) return 0;
+  try {
+    out.gain.value = settings.volume;
+    const t = ctx.currentTime + 0.01;
+    if (kind === 'custom' && customBuf) {
+      const n = ctx.createBufferSource(); n.buffer = customBuf; n.connect(out); n.start(t);
+      return Math.min(1500, Math.round(customBuf.duration * 1000) + 30);
+    }
+    if (kind === 'click') {
+      staticBurst(t, 0.09, 0.16);
+      tone(t + 0.07, 1450, 0.08, 0.06, 'sine');
+      return 200;
+    }
+    // F1-style: static open, then two quick bright tones, a step down.
+    staticBurst(t, 0.07, 0.12, 2400);
+    tone(t + 0.05, 1975, 0.075, 0.07);
+    tone(t + 0.05, 3950, 0.05, 0.015, 'sine');
+    tone(t + 0.15, 1480, 0.12, 0.075);
+    tone(t + 0.15, 2960, 0.08, 0.015, 'sine');
+    return 290;
   } catch { return 0; }
 }
+// A breath of static when she lets go of the button.
+function radioOut() { if (soundSetting() === 'f1' && audioReady()) try { staticBurst(ctx.currentTime + 0.02, 0.06, 0.07, 2200); } catch { /* ignore */ } }
+export function testChime() { unlockAudio(); loadCustom().then(() => radioChime()); }
 
 // ---------------------------------------------------------------------------
 // Speech queue: urgent calls cut in; stale chatter is dropped.
@@ -261,12 +336,12 @@ function pump() {
   }
   queue.shift();
   speak(next.text, next);
-  // Fetch the next call's audio while this one plays.
-  if (useOpenAI() && queue[0]) openaiAudio(queue[0].text, queue[0]).catch(() => {});
+  // Start downloading the next call's audio while this one plays.
+  if (useOpenAI() && queue[0]) speechJob(queue[0].text, queue[0]);
 }
 function halt() {
   if ('speechSynthesis' in window) speechSynthesis.cancel();
-  if (player) { player.onended = null; player.pause(); }
+  if (playing) { playing.stop(); playing = null; }
 }
 
 let speakingListener = () => {};
@@ -318,15 +393,20 @@ export function instructionsFor(call = {}) {
   ].filter(Boolean).join('\n');
 }
 const useOpenAI = () => settings.engine === 'openai' && !!settings.okey;
-const audioCache = new Map(); // text -> Promise<blob URL>
 // Rough cost guide: about 1.5 cents per minute of speech, about 15 characters a second.
 export const costEstimate = (chars) => (chars / 15 / 60) * 0.015;
 
-export function openaiAudio(text, call = {}) {
+// Speech arrives as raw 24 kHz audio and starts playing while it's still downloading, so she
+// begins talking a fraction of a second after the request instead of after the whole clip.
+const RATE = 24000;
+const jobs = new Map(); // wording -> download (kept, so repeated lines are instant and free)
+export function speechJob(text, call = {}) {
   const spoken = speechify(text);
-  const key = `${settings.ovoice}|${settings.style}|${settings.sound}|${call.priority === 'high'}|${spoken}`;
-  if (audioCache.has(key)) return audioCache.get(key);
-  const job = (async () => {
+  const key = `${settings.ovoice}|${settings.style}|${settings.sound}|${call.priority === 'high' && call.kind !== 'chat'}|${settings.rate}|${spoken}`;
+  if (jobs.has(key)) return jobs.get(key);
+  const job = { chunks: [], samples: 0, done: false, error: null, listeners: new Set() };
+  const notify = () => job.listeners.forEach((f) => f());
+  job.promise = (async () => {
     const res = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
       headers: { Authorization: `Bearer ${settings.okey}`, 'Content-Type': 'application/json' },
@@ -335,7 +415,7 @@ export function openaiAudio(text, call = {}) {
         voice: settings.ovoice || 'marin',
         input: spoken.slice(0, 4000),
         instructions: instructionsFor(call),
-        response_format: 'mp3',
+        response_format: 'pcm',
         speed: Math.max(0.5, Math.min(1.5, settings.rate)),
       }),
     });
@@ -343,19 +423,34 @@ export function openaiAudio(text, call = {}) {
       const msg = res.status === 401 ? 'OpenAI key not accepted' : res.status === 429 ? 'OpenAI limit reached or out of credit' : `OpenAI error ${res.status}`;
       throw Object.assign(new Error(msg), { status: res.status });
     }
-    const url = URL.createObjectURL(await res.blob());
-    // Count what this month's speech has cost (cached lines are free).
+    // Count what this month's speech has cost (repeated lines are free).
     const month = new Date().toISOString().slice(0, 7);
     if (settings.usage.month !== month) settings.usage = { month, chars: 0 };
     settings.usage.chars += spoken.length;
     saveSettings();
-    return url;
-  })();
-  audioCache.set(key, job);
-  job.catch(() => audioCache.delete(key));
-  if (audioCache.size > 200) audioCache.delete(audioCache.keys().next().value);
+    let carry = null;
+    const push = (u8) => {
+      let bytes = u8;
+      if (carry !== null) { const b = new Uint8Array(u8.length + 1); b[0] = carry; b.set(u8, 1); bytes = b; carry = null; }
+      const n = Math.floor(bytes.length / 2);
+      if (bytes.length % 2) carry = bytes[bytes.length - 1];
+      if (!n) return;
+      const f = new Float32Array(n);
+      const dv = new DataView(bytes.buffer, bytes.byteOffset, n * 2);
+      for (let i = 0; i < n; i++) f[i] = dv.getInt16(i * 2, true) / 32768;
+      job.chunks.push(f); job.samples += n;
+      notify();
+    };
+    const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+    if (reader) { for (;;) { const { done, value } = await reader.read(); if (done) break; if (value?.length) push(value); } }
+    else push(new Uint8Array(await res.arrayBuffer()));
+  })().then(() => { job.done = true; notify(); }, (e) => { job.error = e; job.done = true; jobs.delete(key); notify(); });
+  jobs.set(key, job);
+  if (jobs.size > 150) jobs.delete(jobs.keys().next().value);
   return job;
 }
+// Kept for the settings test button and older callers.
+export const openaiAudio = (text, call) => speechJob(text, call).promise;
 
 let lastError = '';
 let errorListener = () => {};
@@ -363,23 +458,47 @@ export const engineError = () => lastError;
 export function onEngineError(fn) { errorListener = fn; }
 function setError(msg) { if (msg !== lastError) { lastError = msg; errorListener(msg); } }
 
+let playing = null;
+function playJob(job, text, done) {
+  const lead = radioChime() / 1000;
+  let next = ctx.currentTime + lead, idx = 0, started = false, endTimer = null;
+  const sources = [];
+  const handle = { stop() { sources.forEach((n) => { try { n.stop(); } catch { /* already done */ } }); clearTimeout(endTimer); job.listeners.delete(feed); } };
+  playing = handle;
+  function feed() {
+    if (playing !== handle) { job.listeners.delete(feed); return; }
+    if (job.error && !started) { job.listeners.delete(feed); playing = null; setError(`${job.error.message}. Using the phone's voice for now.`); deviceSpeak(text, done); return; }
+    // A quarter of a second in hand before starting avoids stutter on slow Wi-Fi.
+    if (!started && !job.done && job.samples < RATE * 0.25) return;
+    while (idx < job.chunks.length) {
+      const f = job.chunks[idx++];
+      const b = ctx.createBuffer(1, f.length, RATE);
+      b.getChannelData(0).set(f);
+      const n = ctx.createBufferSource(); n.buffer = b; n.connect(out);
+      const at = Math.max(next, ctx.currentTime + 0.02);
+      n.start(at); next = at + b.duration; sources.push(n); started = true;
+    }
+    if (job.done) {
+      job.listeners.delete(feed);
+      if (!started) { playing = null; done(); return; }
+      endTimer = setTimeout(() => { if (playing === handle) playing = null; radioOut(); done(); }, Math.max(0, (next - ctx.currentTime) * 1000) + 20);
+    }
+  }
+  job.listeners.add(feed);
+  setError('');
+  feed();
+}
+
 export function speak(text, call = { priority: 'high' }) {
   speaking = call;
   speakingListener(true);
-  const done = () => { speaking = null; speakingListener(false); setTimeout(pump, 350); };
+  const done = () => { if (speaking === call) { speaking = null; speakingListener(false); } setTimeout(pump, 150); };
   if (useOpenAI()) {
-    openaiAudio(text, call).then((url) => {
-      if (speaking !== call) return; // cut off by something more urgent
-      if (!player) player = new Audio();
-      player.src = url;
-      player.volume = settings.volume;
-      player.onended = done;
-      const delay = radioClick();
-      setTimeout(() => player.play().then(() => setError('')).catch(() => { setError('Tap the screen once so the phone lets her speak.'); deviceSpeak(text, done); }), delay);
-    }).catch((e) => {
-      setError(`${e.message}. Using the phone's voice for now.`);
-      if (speaking === call) deviceSpeak(text, done);
-    });
+    if (!audioReady()) unlockAudio();
+    if (!audioReady()) { setError('Tap the screen once so the phone lets her speak.'); deviceSpeak(text, done); return; }
+    out.gain.value = settings.volume;
+    if (soundSetting() === 'custom') loadCustom();
+    playJob(speechJob(text, call), text, done);
     return;
   }
   deviceSpeak(text, done);
@@ -395,7 +514,7 @@ function deviceSpeak(text, done) {
   u.pitch = p.pitch;
   u.volume = settings.volume;
   u.onend = u.onerror = done;
-  const delay = radioClick();
+  const delay = radioChime();
   setTimeout(() => speechSynthesis.speak(u), delay);
 }
 

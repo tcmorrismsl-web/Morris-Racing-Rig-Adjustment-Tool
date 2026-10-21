@@ -48,15 +48,17 @@ class Calls {
 
 // Mini-sector times for one car.
 class Splits {
-  constructor() { this.enter = new Array(SEGMENTS).fill(null); this.lapNum = null; this.lastSeg = -1; this.lastLap = null; this.bestLap = null; this.bestMs = 0; }
-  update(c, segLen) {
+  // bounds: start distance of each zone (corner zones, or equal parts when the track isn't known)
+  constructor(bounds) { this.bounds = bounds; this.n = bounds.length; this.enter = new Array(this.n).fill(null); this.lapNum = null; this.lastSeg = -1; this.lastLap = null; this.bestLap = null; this.bestMs = 0; }
+  zoneOf(d) { let k = 0; while (k + 1 < this.n && d >= this.bounds[k + 1]) k++; return k; }
+  update(c) {
     if (c.lapNum !== this.lapNum) {
       if (this.lapNum !== null && c.lapNum === this.lapNum + 1 && c.lastLapMs > 0) this.finish(c.lastLapMs);
-      this.lapNum = c.lapNum; this.enter = new Array(SEGMENTS).fill(null); this.enter[0] = 0; this.lastSeg = 0;
+      this.lapNum = c.lapNum; this.enter = new Array(this.n).fill(null); this.enter[0] = 0; this.lastSeg = 0;
       return true;
     }
     if (!(c.lapDistance >= 0)) return false;
-    const seg = Math.min(SEGMENTS - 1, Math.floor(c.lapDistance / segLen));
+    const seg = this.zoneOf(c.lapDistance);
     if (seg > this.lastSeg) {
       for (let k = this.lastSeg + 1; k <= seg; k++) this.enter[k] = c.currentLapMs;
       this.lastSeg = seg;
@@ -65,10 +67,26 @@ class Splits {
   }
   finish(lapMs) {
     if (this.enter.some((v) => v === null)) { this.lastLap = null; return; }
-    const segs = this.enter.map((v, k) => (k < SEGMENTS - 1 ? this.enter[k + 1] - v : lapMs - v));
+    const segs = this.enter.map((v, k) => (k < this.n - 1 ? this.enter[k + 1] - v : lapMs - v));
     if (segs.some((v) => v <= 0)) { this.lastLap = null; return; }
     this.lastLap = { ms: lapMs, segs };
     if (!this.bestMs || lapMs < this.bestMs) { this.bestMs = lapMs; this.bestLap = this.lastLap; }
+  }
+}
+
+// Pick one of several wordings, avoiding the ones used most recently.
+class Variety {
+  constructor() { this.used = {}; }
+  pick(key, options) {
+    const used = this.used[key] || (this.used[key] = []);
+    const idx = options.map((_, i) => i);
+    const fresh = idx.filter((i) => !used.includes(i));
+    const pool = fresh.length ? fresh : idx;
+    const i = pool[Math.floor(Math.random() * pool.length)];
+    used.push(i);
+    while (used.length > Math.max(1, options.length - 1)) used.shift(); // every wording before any repeats
+    const o = options[i];
+    return typeof o === 'function' ? o() : o;
   }
 }
 
@@ -102,11 +120,24 @@ class F1Engineer {
     this.boxPlan = null;
     this.flagAt = {};
     this.adviceSeen = {};
+    this.vary = new Variety();
+    this.topicLap = {};       // talking point -> lap it was last used
+    this.lapNotes = null;     // what the last lap tells us, for the next talking point
+    this.coached = [];        // corners recently coached, so advice moves around the lap
+    this.secLive = null; this.bestSec = [0, 0, 0];
+    this.sayAt = 0;           // last time a non-urgent talking point went out
+    this.deferred = null;     // a second talking point for later in the lap
+    this.rivalPitAt = {}; this.tmState = null; this.aheadOrder = null; this.aheadOrderAt = 0;
   }
 
   blankLapInfo() { return { lock: new Array(SEGMENTS).fill(0), spin: new Array(SEGMENTS).fill(0), minSpeed: new Array(SEGMENTS).fill(999) }; }
 
   get segLen() { return (this.race.session.trackLength || 5000) / SEGMENTS; }
+  bounds() {
+    const z = this.race.coach?.zones || [];
+    if (z.length) return z.map((x) => x.from);
+    return Array.from({ length: SEGMENTS }, (_, k) => k * this.segLen);
+  }
   name(i) { return this.race.name(i); }
   get me() { return this.race.player; }
   get isRace() { const t = this.race.session.sessionType; return t >= 15 && t <= 17; }
@@ -156,11 +187,12 @@ class F1Engineer {
     const me = this.me;
     const len = r.session.trackLength;
     if (!len) return;
-    // Mini-sectors for every car; pit exit position learned from cars leaving the pits.
+    if (!this.boundsCache || this.boundsLen !== len || this.boundsZones !== (r.coach?.zones || []).length) { this.boundsCache = this.bounds(); this.boundsLen = len; this.boundsZones = (r.coach?.zones || []).length; }
+    // Zone times for every car; pit exit position learned from cars leaving the pits.
     r.lap.forEach((c, i) => {
       if (!c || !c.position || c.resultStatus > 2) return;
-      if (!this.splits[i]) this.splits[i] = new Splits();
-      this.splits[i].update(c, this.segLen);
+      if (!this.splits[i] || this.splits[i].n !== this.boundsCache.length) this.splits[i] = new Splits(this.boundsCache);
+      this.splits[i].update(c);
       const wasPit = this.prevPit[i];
       if (wasPit > 0 && c.pitStatus === 0 && c.lapDistance > 0 && c.lapDistance < len / 3) {
         this.pitExits.push(c.lapDistance);
@@ -171,6 +203,8 @@ class F1Engineer {
     const c = r.lap[me];
     if (!c || !c.lapNum) return;
 
+    // Your sector splits as they happen (the lap packet resets them at the line).
+    if (c.sector >= 1 && c.s1Ms) this.secLive = { lap: c.lapNum, s1: c.s1Ms, s2: c.sector >= 2 && c.s2Ms ? c.s2Ms : (this.secLive?.lap === c.lapNum ? this.secLive.s2 : 0) };
     // Lap completed
     if (this.lastLapNum !== null && c.lapNum === this.lastLapNum + 1) this.lapDone(c);
     this.lastLapNum = c.lapNum;
@@ -226,21 +260,31 @@ class F1Engineer {
   // ---------------- lap complete ----------------
   lapDone(c) {
     const me = this.me;
-    const sp = this.splits[me];
+    const r = this.race;
     const ms = c.lastLapMs;
-    const info = this.mine;
     this.mine = this.blankLapInfo();
-    if (!ms || !sp?.lastLap) return;
-    const invalid = this.race.lastLapInvalid;
-    // Remember my best lap and its per-sector detail.
-    const myLap = { ms, segs: sp.lastLap.segs, info };
-    const prevBest = this.myBest;
-    if (!invalid && (!this.myBestMs || ms < this.myBestMs)) { this.myBest = myLap; this.myBestMs = ms; }
+    const invalid = r.lastLapInvalid;
+    const res = r.coach.lapDone(c.lapNum - 1, ms, invalid);
+    if (!ms) return;
+    const prevBestMs = this.myBestMs;
+    if (!invalid && (!this.myBestMs || ms < this.myBestMs)) this.myBestMs = ms;
 
-    // Reference: qualifying = the fastest lap anyone has done; race = the car ahead's last lap.
+    // Sector times for this lap, and whether they were personal or session bests.
+    const sl = this.secLive && this.secLive.lap === c.lapNum - 1 && this.secLive.s1 && this.secLive.s2 ? this.secLive : null;
+    const secs = sl ? [sl.s1, sl.s2, ms - sl.s1 - sl.s2] : null;
+    const session = r.sectors()?.session || [null, null, null];
+    const marks = secs && !invalid ? secs.map((v, k) => {
+      const purple = v > 0 && (!session[k] || v <= session[k] + 1);
+      const pb = v > 0 && (!this.bestSec[k] || v < this.bestSec[k]);
+      if (pb) this.bestSec[k] = v;
+      return purple ? 'purple' : pb ? 'pb' : null;
+    }) : [null, null, null];
+
+    // Time per corner against a reference: the car ahead in a race, the fastest car otherwise.
+    const sp = this.splits[me];
     let ref = null, refName = null;
     if (this.isRace) {
-      const ahead = this.race.lap.findIndex((x) => x && x.position === c.position - 1);
+      const ahead = r.lap.findIndex((x) => x && x.position === c.position - 1);
       const a = this.splits[ahead];
       if (ahead >= 0 && a?.lastLap) { ref = a.lastLap.segs; refName = this.name(ahead); }
     } else {
@@ -248,93 +292,341 @@ class F1Engineer {
       for (const [i, s] of Object.entries(this.splits)) if (Number(i) !== me && s.bestLap && (!best || s.bestMs < best.ms)) best = { ms: s.bestMs, segs: s.bestLap.segs, i: Number(i) };
       if (best && best.ms < ms) { ref = best.segs; refName = this.name(best.i); }
     }
-    if (!ref && prevBest && prevBest.ms < ms) { ref = prevBest.segs; refName = 'your best lap'; }
+    const zones = r.coach.zones;
+    const lap = res?.lap || null;
+    const own = lap && res.prevBest && res.prevBest !== lap ? res.prevBest : lap && r.coach.best !== lap ? r.coach.best : null;
+    let loss = null;
+    if (ref && sp?.lastLap && sp.lastLap.segs.length === ref.length) loss = sp.lastLap.segs.map((v, k) => v - ref[k]);
+    else if (lap && own) { loss = lap.corners.map((x, k) => x.time - own.corners[k].time); refName = 'your best lap'; }
+    if (loss) this.segLoss = loss.map((v) => Math.round(v));
+    const coaching = this.coaching(lap, own, loss, refName);
+    const gains = lap && own && ms < own.ms ? lap.corners.map((x, k) => ({ k, d: own.corners[k].time - x.time })).filter((x) => x.d >= 80).sort((a, b) => b.d - a.d) : [];
+    const ers = lap && r.format < 2026 && !this.isQuali ? r.coach.ers(lap) : null;
+    this.lapNotesPrev = this.lapNotes;
+    this.lapNotes = { lap: c.lapNum - 1, ms, invalid, secs, marks, coaching, gains: gains.slice(0, 2).map((g) => zones[g.k]?.name).filter(Boolean), ers };
 
     if (!this.isRace) {
-      const delta = prevBest ? ms - prevBest.ms : null;
-      this.calls.say('lap-done', { ms, delta, invalid, pos: c.position }, `${invalid ? 'Lap deleted, track limits. ' : ''}${lapTime(ms)}${delta !== null && !invalid ? `, ${delta < 0 ? 'personal best by' : 'plus'} ${sec(Math.abs(delta), 3)}` : ''}. P${c.position}.`, { priority: 'normal' });
-    }
-    if (ref) {
-      const loss = myLap.segs.map((v, k) => v - ref[k]);
-      this.segLoss = loss.map((v) => Math.round(v));
-      let worst = 0;
-      loss.forEach((v, k) => { if (v > loss[worst]) worst = k; });
-      if (loss[worst] >= 120) {
-        const from = worst * this.segLen, to = from + this.segLen;
-        const fix = this.fixFor(worst, info);
-        const data = { seg: worst, fromKm: from / 1000, toKm: to / 1000, sector: this.sectorOf(from), lossMs: loss[worst], ref: refName, fix: fix.kind };
-        const same = this.lastLoss && this.lastLoss.seg === worst && this.lastLoss.fix === data.fix;
-        this.lossRepeat = same ? (this.lossRepeat || 0) + 1 : 0;
-        this.lastLoss = data;
-        // Same spot, same problem: mention it every third lap rather than every lap.
-        if (this.lossRepeat % 3 === 0) this.calls.say('losing-time', data, `Most time lost in sector ${data.sector}, ${data.fromKm.toFixed(1)} to ${data.toKm.toFixed(1)} km: ${sec(data.lossMs, 2)} slower than ${refName} there. ${fix.text}`, { priority: 'normal' });
-      }
+      const delta = prevBestMs ? ms - prevBestMs : null;
+      const secText = this.sectorText(marks, secs, delta);
+      const pb = !invalid && delta !== null && delta < 0;
+      const base = invalid ? `Lap deleted, track limits. ${lapTime(ms)}.`
+        : pb ? this.vary.pick('pb', [`${lapTime(ms)}, personal best by ${sec(-delta, 3)}.`, `Personal best: ${lapTime(ms)}, ${sec(-delta, 3)} quicker.`, `That's ${lapTime(ms)}. Improvement of ${sec(-delta, 3)}.`])
+          : delta !== null ? this.vary.pick('lap', [`${lapTime(ms)}, plus ${sec(delta, 3)}.`, `${lapTime(ms)}. ${sec(delta, 3)} off your best.`, `Lap time ${lapTime(ms)}, ${sec(delta, 3)} down.`])
+            : `${lapTime(ms)}.`;
+      const gainText = pb && this.lapNotes.gains.length ? ` ${this.vary.pick('gain', [`${this.lapNotes.gains[0]} was your best yet.`, `Big gain in ${this.lapNotes.gains[0]}.`, `${this.lapNotes.gains[0]} made the difference.`])}` : '';
+      this.calls.say('lap-done', { ms, delta, invalid, pos: c.position, marks }, `${base}${secText}${gainText} P${c.position}.`, { priority: 'normal' });
+      // Coaching straight after the lap time, but not every lap at the same corner.
+      if (coaching && !invalid) this.calls.say('losing-time', coaching.data, coaching.text, { priority: 'normal', key: `coach-${c.lapNum}` });
     }
   }
 
-  fixFor(k, info) {
-    const best = this.myBest?.info;
-    if (info.lock[k] >= 3) return { kind: 'lockup', text: 'You locked the fronts in there. Brake a touch earlier and ease off the pedal as you turn in.' };
-    if (info.spin[k] >= 3) return { kind: 'traction', text: 'Wheelspin on the exit. Be more patient with the throttle and short-shift.' };
-    if (best && info.minSpeed[k] < 900 && best.minSpeed[k] < 900 && info.minSpeed[k] < best.minSpeed[k] - 6) {
-      return { kind: 'apex', text: `Minimum speed was ${Math.round(best.minSpeed[k] - info.minSpeed[k])} km/h down on your best. Brake a little lighter and carry more speed to the apex.` };
+  sectorText(marks, secs, delta) {
+    if (!secs) return '';
+    const p = marks.map((m, k) => (m === 'purple' ? k + 1 : null)).filter(Boolean);
+    const g = marks.map((m, k) => (m === 'pb' ? k + 1 : null)).filter(Boolean);
+    if (p.length === 3) return ' Purple in every sector!';
+    const parts = [];
+    if (p.length) parts.push(`purple sector ${p.join(' and ')}`);
+    if (g.length) parts.push(`personal best in sector ${g.join(' and ')}`);
+    if (!parts.length) return '';
+    const s = parts.join(', ');
+    return ` ${s[0].toUpperCase()}${s.slice(1)}.`;
+  }
+
+  // Where the lap went and what to do about it, by corner.
+  coaching(lap, own, loss, refName) {
+    const zones = this.race.coach.zones;
+    if (!loss || !zones.length || loss.length !== zones.length) return null;
+    const ranked = loss.map((v, k) => ({ k, v })).filter((x) => x.v >= 100).sort((a, b) => b.v - a.v).slice(0, 4);
+    if (!ranked.length) return null;
+    // Prefer a corner not coached on the last two laps, unless one is clearly the worst.
+    // Same corner told twice running: move on to the next one, and only come back every few laps.
+    this.coachCount = this.coachCount || {};
+    let pickZ = ranked.find((x) => !this.coached.includes(x.k));
+    if (!pickZ || ranked[0].v > pickZ.v * 1.6) pickZ = ranked[0];
+    const told = this.coachCount[pickZ.k] || { n: 0, lap: -99 };
+    if (told.n >= 2 && this.race.lap[this.me]?.lapNum - told.lap < 5) {
+      pickZ = ranked.find((x) => x.k !== pickZ.k && !(this.coachCount[x.k]?.n >= 2 && this.race.lap[this.me]?.lapNum - this.coachCount[x.k].lap < 5));
+      if (!pickZ) return null;
     }
-    return { kind: 'line', text: 'Try braking a fraction later and get on the power earlier on the exit.' };
+    const k = pickZ.k, z = zones[k];
+    this.coachCount[k] = { n: (this.coachCount[k]?.n || 0) + 1, lap: this.race.lap[this.me]?.lapNum || 0 };
+    const adv = lap && own ? this.race.coach.advise(k, lap, own) : lap ? this.race.coach.advise(k, lap, null) : null;
+    const again = this.coached.includes(k);
+    this.coached.unshift(k); this.coached.length = Math.min(this.coached.length, 2);
+    const lossS = sec(pickZ.v, 2);
+    const vs = refName ? (refName === 'your best lap' ? 'to your best lap' : `to ${refName}`) : '';
+    const what = adv ? adv.bits.join(', ') : null;
+    const fix = adv ? adv.fix : this.vary.pick('samefix', ['Your inputs matched your best there, so try a later apex and an earlier throttle.', 'Same brake point and apex speed as your best, so it is the line: open the exit up.']);
+    const text = adv
+      ? this.vary.pick('coach', [
+        `${z.name}: ${lossS} ${vs}. ${cap(what)}. ${fix}`,
+        `Biggest loss was ${z.name}, ${lossS} ${vs}. ${cap(what)}. ${fix}`,
+        `Look at ${z.name}. ${cap(what)}, worth ${lossS}. ${fix}`,
+        again ? `Still losing in ${z.name}, ${lossS}. ${cap(what)}. ${this.vary.pick('alt', ['Try something different there:', 'New approach:', 'Next lap:'])} ${fix}` : `In ${z.name} ${what}. That cost ${lossS}. ${fix}`,
+      ])
+      : this.vary.pick('coach0', [`Most time went in ${z.name}, ${lossS} ${vs}. ${fix}`, `${z.name} is where it's going, ${lossS} ${vs}. ${fix}`]);
+    const data = { zone: k, corner: z.name, from: Math.round(z.from), to: Math.round(z.to), lossMs: Math.round(pickZ.v), ref: refName, fix: adv?.kind || 'line', bits: adv?.bits || [], named: !!this.race.coach.map?.named };
+    this.lastLoss = data;
+    this.lastLossText = text;
+    return { text, data, score: Math.min(90, 55 + pickZ.v / 10) };
   }
 
   // ---------------- race ----------------
+  // Urgent calls (box, flags, safety car, attack/defend, position changes) go out straight away.
+  // Everything else is a talking point: at the line each lap she picks the most interesting one
+  // she hasn't used lately, and maybe a second one for later in the lap.
   raceCalls(c) {
     const r = this.race;
     const s = r.session;
     const me = this.me;
+    const now = this.now();
     const lapsLeft = s.totalLaps ? s.totalLaps - c.lapNum + 1 : null;
     const behindIdx = r.lap.findIndex((x) => x && x.position === c.position + 1 && x.resultStatus === 2);
     const aheadIdx = r.lap.findIndex((x) => x && x.position === c.position - 1);
     const gapAhead = c.position > 1 ? c.gapAheadMs : null;
     const gapBehind = behindIdx >= 0 ? r.lap[behindIdx].gapAheadMs : null;
 
-    // Splits once per lap as you cross the line.
     if (this.lineLap !== c.lapNum && c.lapDistance > 0 && c.lapDistance < 400 && c.lapNum > 1) {
       this.lineLap = c.lapNum;
-      const prev = this.lineGaps;
-      const data = {
-        pos: c.position, lapsLeft,
-        ahead: aheadIdx >= 0 ? { name: this.name(aheadIdx), gapMs: gapAhead, changeMs: prev?.ahead === this.name(aheadIdx) && prev.gapAhead !== null ? gapAhead - prev.gapAhead : null } : null,
-        behind: behindIdx >= 0 ? { name: this.name(behindIdx), gapMs: gapBehind, changeMs: prev?.behind === this.name(behindIdx) && prev.gapBehind !== null ? gapBehind - prev.gapBehind : null } : null,
-      };
-      this.lineGaps = { ahead: data.ahead?.name, gapAhead, behind: data.behind?.name, gapBehind };
-      this.calls.say('splits', data, splitsText(data), { priority: 'normal' });
-      if (lapsLeft === 1) this.calls.say('final-lap', { pos: c.position }, `Final lap. P${c.position}. Bring it home clean.`, { priority: 'high' });
+      if (lapsLeft === 1) this.calls.say('final-lap', { pos: c.position }, this.vary.pick('final', [`Final lap. P${c.position}. Bring it home clean.`, `Last lap, P${c.position}. Nice and tidy now.`, `This is the last one. P${c.position}, no risks.`]), { priority: 'high' });
       // Pit window from the game's strategy.
       if (s.pitIdealLap > 0 && (c.pitStops || 0) === 0) {
         if (c.lapNum === s.pitIdealLap - 2) this.calls.say('pit-soon', { lap: s.pitIdealLap, rejoin: s.pitRejoinPosition }, `Pit window opens in two laps. Plan is lap ${s.pitIdealLap}.`, { priority: 'normal' });
         if (c.lapNum === s.pitIdealLap) this.calls.say('box-ask', { lap: s.pitIdealLap, rejoin: s.pitRejoinPosition, tyre: this.bestSet()?.name }, `This is the lap. Box, box?${s.pitRejoinPosition ? ` You'd rejoin around P${s.pitRejoinPosition}.` : ''}`, { priority: 'high', ask: 'box-window' });
       }
       if (this.boxPlan && this.boxPlan.lap === c.lapNum) this.calls.say('box-now', { tyre: this.boxPlan.tyre }, `Box this lap, box this lap.${this.boxPlan.tyre ? ` ${this.boxPlan.tyre}s are ready.` : ''}`, { priority: 'high', cooldownS: 20 });
+      if (lapsLeft !== 1) this.talkingPoints(c, { aheadIdx, behindIdx, gapAhead, gapBehind, lapsLeft });
+    }
+    // The second talking point, once you're a third of the way round.
+    if (this.deferred && this.deferred.lap === c.lapNum && c.lapDistance > (s.trackLength || 5000) * 0.35 && now - this.sayAt > 8000) {
+      const d = this.deferred; this.deferred = null;
+      this.speakTopic(d.t, c.lapNum);
     }
 
     // DRS / defend alerts.
     if (gapAhead !== null && this.prevGapAhead !== null && gapAhead < 1000 && this.prevGapAhead >= 1000 && aheadIdx >= 0) {
-      this.calls.say('attack', { name: this.name(aheadIdx), gapMs: gapAhead, era: r.format >= 2026 ? 2026 : 2025 }, `Within a second of ${this.name(aheadIdx)}. ${r.format >= 2026 ? 'Overtake mode is yours next lap.' : 'DRS range.'} Go get him.`, { priority: 'normal', cooldownS: 25, key: `attack-${aheadIdx}` });
+      const name = this.name(aheadIdx), drs = r.format >= 2026 ? 'Overtake mode is yours next lap.' : 'DRS range.';
+      this.calls.say('attack', { name, gapMs: gapAhead, era: r.format >= 2026 ? 2026 : 2025 }, this.vary.pick('attack', [`Within a second of ${name}. ${drs} Go get him.`, `${drs} You're on ${name}'s gearbox.`, `${name} is in range, under a second. ${drs}`]), { priority: 'normal', cooldownS: 25, key: `attack-${aheadIdx}` });
     }
     if (gapBehind !== null && this.prevGapBehind !== null && gapBehind < 1000 && this.prevGapBehind >= 1000 && behindIdx >= 0) {
-      this.calls.say('defend', { name: this.name(behindIdx), gapMs: gapBehind }, `${this.name(behindIdx)} is within a second behind. Defend into the braking zones.`, { priority: 'normal', cooldownS: 25, key: `defend-${behindIdx}` });
+      const name = this.name(behindIdx);
+      this.calls.say('defend', { name, gapMs: gapBehind }, this.vary.pick('defend', [`${name} is within a second behind. Defend into the braking zones.`, `${name} has DRS on you. Cover the inside.`, `Car behind, ${name}, under a second. Protect your line.`]), { priority: 'normal', cooldownS: 25, key: `defend-${behindIdx}` });
     }
     this.prevGapAhead = gapAhead; this.prevGapBehind = gapBehind;
 
     // Position changes (after 3 seconds stable, so swaps in a corner don't spam).
-    const now = this.now();
     if (c.position !== this.posStable) {
       if (this.prevPos !== c.position) { this.prevPos = c.position; this.posSince = now; }
       else if (now - this.posSince > 3000) {
         if (this.posStable !== null && c.pitStatus === 0) {
           const gained = c.position < this.posStable;
           const other = gained ? r.lap.findIndex((x) => x && x.position === c.position + 1) : r.lap.findIndex((x) => x && x.position === c.position - 1);
-          this.calls.say(gained ? 'pos-gain' : 'pos-lost', { pos: c.position, name: other >= 0 ? this.name(other) : null }, gained ? `P${c.position}. Nice move${other >= 0 ? ` on ${this.name(other)}` : ''}.` : `Lost one to ${other >= 0 ? this.name(other) : 'the car behind'}. P${c.position}. Stay with him.`, { priority: 'normal', cooldownS: 5 });
+          const who = other >= 0 ? this.name(other) : null;
+          this.calls.say(gained ? 'pos-gain' : 'pos-lost', { pos: c.position, name: who }, gained
+            ? this.vary.pick('gain', [`P${c.position}. Nice move${who ? ` on ${who}` : ''}.`, `That's P${c.position}${who ? `, ${who} done` : ''}.`, `Up to P${c.position}. Clean pass.`])
+            : this.vary.pick('lost', [`Lost one to ${who || 'the car behind'}. P${c.position}. Stay with him.`, `${who || 'He'} is through. P${c.position}, stay in the tow.`, `P${c.position}. ${who || 'He'} got by, keep him honest.`]), { priority: 'normal', cooldownS: 5 });
         }
         this.posStable = c.position;
       }
     }
+    this.raceEvents(c);
+  }
+
+  // Things around you that happen mid-lap: rivals pitting, your teammate, overtakes ahead.
+  raceEvents(c) {
+    const r = this.race;
+    const now = this.now();
+    if (!this.lightsOut || c.lapNum < 2) { this.snapshotAhead(c); return; }
+    const pitLoss = (r.coach.map?.pit || 22) * 1000;
+    r.lap.forEach((o, i) => {
+      if (!o || i === this.me || o.resultStatus !== 2) return;
+      const was = this.prevPitEv?.[i] ?? 0;
+      if (was === 0 && o.pitStatus === 1 && Math.abs(o.position - c.position) <= 3 && now - (this.rivalPitAt[i] || 0) > 60000) {
+        this.rivalPitAt[i] = now;
+        const ahead = o.position < c.position;
+        const gap = Math.abs((o.totalDistance - (r.lap[this.me].totalDistance || 0)) / Math.max(1, r.session.trackLength || 5000)) * (this.myBestMs || 90000);
+        const name = this.name(i);
+        const text = ahead
+          ? (gap < pitLoss ? `${name} ahead is in the pits. He should come out behind you. Push now.` : `${name} ahead has boxed. He'll rejoin in front, but on fresher tyres.`)
+          : (gap < pitLoss ? `${name} behind is pitting. Watch the undercut: push hard this lap and next.` : `${name} behind has stopped. He's out of your fight for now.`);
+        this.calls.say('rival-pit', { name, ahead }, text, { priority: 'normal', key: `rp-${i}` });
+      }
+    });
+    this.prevPitEv = r.lap.map((o) => o?.pitStatus ?? 0);
+    // Your teammate stopping or retiring.
+    const tm = this.teammate();
+    if (tm !== null) {
+      const o = r.lap[tm];
+      const st = { pit: o?.pitStatus, res: o?.resultStatus };
+      const name = this.name(tm);
+      if (this.tmState && this.tmState.pit === 0 && st.pit === 1) this.calls.say('teammate', { name, event: 'pit' }, this.vary.pick('tmpit', [`Your teammate ${name} is boxing this lap.`, `${name}, your teammate, is in the pits.`]), { priority: 'low', key: 'tm-pit', cooldownS: 30 });
+      if (this.tmState && this.tmState.res === 2 && st.res > 2) this.calls.say('teammate', { name, event: 'out' }, `${name} is out of the race. It's all on you now.`, { priority: 'normal', key: 'tm-out' });
+      this.tmState = st;
+    }
+    // Overtakes among the cars just ahead of you.
+    const order = this.snapshotAhead(c);
+    if (order && this.aheadOrder && now - this.aheadOrderAt > 25000) {
+      for (let k = 0; k + 1 < order.length; k++) {
+        const a = order[k], b = order[k + 1];
+        const pa = this.aheadOrder.indexOf(a), pb = this.aheadOrder.indexOf(b);
+        if (pa >= 0 && pb >= 0 && pa > pb) {
+          this.aheadOrderAt = now;
+          const pos = r.lap[a]?.position;
+          this.calls.say('battle-pass', { name: this.name(a), over: this.name(b), pos }, this.vary.pick('pass', [`${this.name(a)} is through on ${this.name(b)} ahead of you, for P${pos}.`, `Change of order up the road: ${this.name(a)} past ${this.name(b)}.`]), { priority: 'low' });
+          break;
+        }
+      }
+    }
+    this.aheadOrder = order;
+  }
+
+  snapshotAhead(c) {
+    const r = this.race;
+    const out = [];
+    for (let p = c.position - 3; p < c.position; p++) { const i = r.lap.findIndex((x) => x && x.position === p && x.resultStatus === 2); if (i >= 0) out.push(i); }
+    return out.length >= 2 ? out : null;
+  }
+
+  teammate() {
+    const parts = this.race.parts || [];
+    const my = parts[this.me];
+    if (!my || my.teamId === undefined || my.teamId === 255) return null;
+    const i = parts.findIndex((p, k) => k !== this.me && p && p.teamId === my.teamId);
+    return i >= 0 && this.race.lap[i]?.position ? i : null;
+  }
+
+  // Gather what's worth saying this lap, score it, and say the best one or two.
+  talkingPoints(c, g) {
+    const r = this.race;
+    const lap = c.lapNum;
+    const t = [];
+    const add = (kind, score, every, text, data = {}) => { if (text && (this.topicLap[kind] === undefined || lap - this.topicLap[kind] >= every)) t.push({ kind, score, text, data }); };
+    const name = (i) => this.name(i);
+    const prev = this.lineGaps;
+
+    // Gaps to the cars around you.
+    const data = {
+      pos: c.position, lapsLeft: g.lapsLeft,
+      ahead: g.aheadIdx >= 0 ? { name: name(g.aheadIdx), gapMs: g.gapAhead, changeMs: prev?.ahead === name(g.aheadIdx) && prev.gapAhead !== null ? g.gapAhead - prev.gapAhead : null } : null,
+      behind: g.behindIdx >= 0 ? { name: name(g.behindIdx), gapMs: g.gapBehind, changeMs: prev?.behind === name(g.behindIdx) && prev.gapBehind !== null ? g.gapBehind - prev.gapBehind : null } : null,
+    };
+    this.lineGaps = { ahead: data.ahead?.name, gapAhead: g.gapAhead, behind: data.behind?.name, gapBehind: g.gapBehind };
+    const big = Math.max(Math.abs(data.ahead?.changeMs || 0), Math.abs(data.behind?.changeMs || 0));
+    const close = (data.ahead && data.ahead.gapMs < 2000) || (data.behind && data.behind.gapMs < 2000);
+    add('splits', big >= 500 ? 85 : close ? 70 : 40, big >= 500 ? 1 : close ? 2 : 3, this.splitsVaried(data), data);
+
+    // Wheel settings against the app's suggestion for this track (brake bias and diff change on the move).
+    const tg = this.targets;
+    const st0 = r.status[this.me] || {};
+    const bias = r.setup?.brakeBias || st0.brakeBias, diff = r.setup?.diffOn;
+    if (tg && Date.now() - tg.at < 120000) {
+      const parts = [];
+      if (tg.brakeBias && bias && Math.abs(bias - tg.brakeBias) >= 2) parts.push(`brake bias ${bias > tg.brakeBias ? 'back' : 'forward'} ${Math.abs(bias - tg.brakeBias)}, to ${tg.brakeBias}%`);
+      if (tg.diffOn && diff && Math.abs(diff - tg.diffOn) >= 10) parts.push(`on-throttle diff ${diff > tg.diffOn ? 'down' : 'up'} to ${tg.diffOn}%`);
+      if (parts.length) add('wheel-setup', 60, 8, this.vary.pick('ws', [`From the wheel: ${parts.join(', and ')}. That's the suggested setup for this track and it's allowed on the move.`, `One for the MFD: ${parts.join(' and ')}. Matches the setup sheet for here.`]), { parts });
+    }
+
+    // Battles ahead and behind.
+    const near = (pos) => r.lap.findIndex((x) => x && x.position === pos && x.resultStatus === 2);
+    const a1 = near(c.position - 1), a2 = near(c.position - 2);
+    if (a1 >= 0 && a2 >= 0 && r.lap[a1].gapAheadMs < 1000 && g.gapAhead < 5000) {
+      add('battle-ahead', 72, 4, this.vary.pick('bah', [
+        `${name(a2)} and ${name(a1)} are fighting for P${c.position - 2} just up the road, ${sec(g.gapAhead)} ahead of you. They're slowing each other down.`,
+        `There's a scrap ahead: ${name(a1)} is all over ${name(a2)}. You're ${sec(g.gapAhead)} behind them. Be ready to pick one off.`,
+        `${name(a1)} is trying to pass ${name(a2)} ahead. Close in while they fight.`,
+      ]), { a: name(a2), b: name(a1) });
+    }
+    const b1 = near(c.position + 1), b2 = near(c.position + 2);
+    if (b1 >= 0 && b2 >= 0 && r.lap[b2].gapAheadMs < 1000 && g.gapBehind !== null && g.gapBehind < 4000) {
+      add('battle-behind', 62, 4, this.vary.pick('bbe', [
+        `${name(b1)} and ${name(b2)} are fighting behind you, ${sec(g.gapBehind)} back. Good for us, they're losing time.`,
+        `Behind you, ${name(b2)} is attacking ${name(b1)}. Use it and build the gap.`,
+      ]), { a: name(b1), b: name(b2) });
+    }
+
+    // Your teammate.
+    const tm = this.teammate();
+    if (tm !== null) {
+      const o = r.lap[tm], st = r.status[tm] || {};
+      const gap = (o.totalDistance - (c.totalDistance || 0)) / Math.max(1, r.session.trackLength || 5000) * ((this.myBestMs || 90000) / 1000);
+      const where = Math.abs(gap) < 15 ? `, ${sec(Math.abs(gap) * 1000)} ${gap > 0 ? 'ahead of' : 'behind'} you` : '';
+      const tyre = TYRE_NAME[st.visual] ? ` on ${st.tyreAge}-lap ${TYRE_NAME[st.visual]}s` : '';
+      add('teammate', Math.abs(gap) < 3 ? 70 : 48, 6, this.vary.pick('tm', [`Your teammate ${name(tm)} is P${o.position}${where}${tyre}.`, `Team update: ${name(tm)} running P${o.position}${where}.`, `${name(tm)} is P${o.position}${tyre}. ${Math.abs(gap) < 3 ? 'Race him clean.' : ''}`]), { name: name(tm), pos: o.position });
+    }
+
+    // The race as a whole.
+    const leader = near(1), second = near(2);
+    if (leader >= 0 && second >= 0) {
+      const lastLaps = r.lap.map((x, i) => ({ i, ms: x?.lastLapMs || 0, pos: x?.position })).filter((x) => x.ms > 0 && x.pos <= 12).sort((a, b) => a.ms - b.ms);
+      const scNow = r.session.safetyCar === 1 || r.session.safetyCar === 2;
+      const quick = scNow ? '' : lastLaps[0] && lastLaps[0].i !== this.me ? ` Quickest on track last lap was ${name(lastLaps[0].i)}, ${lapTime(lastLaps[0].ms)}.` : lastLaps[0] ? ' You were the quickest car on track last lap.' : '';
+      const me1 = c.position === 1;
+      add('overview', 44, 7, this.vary.pick('ov', [
+        `Race update: ${name(leader)} leads by ${sec(r.lap[second].gapAheadMs)} from ${name(second)}.${me1 ? '' : ` You're ${sec(c.gapLeaderMs)} off the lead.`}${quick}`,
+        `${me1 ? `You lead by ${sec(r.lap[second].gapAheadMs)}.` : `Up front it's ${name(leader)}, ${sec(r.lap[second].gapAheadMs)} clear of ${name(second)}.`}${quick}`,
+      ]));
+    }
+
+    // Tyres on the cars around you.
+    const tyreOf = (i) => ({ st: r.status[i] || {}, wear: r.wearAll?.[i] ? Math.max(...r.wearAll[i]) : null });
+    const mine = tyreOf(this.me);
+    for (const [i, side] of [[g.aheadIdx, 'ahead'], [g.behindIdx, 'behind']]) {
+      if (i < 0) continue;
+      const o = tyreOf(i);
+      const ageDiff = (o.st.tyreAge ?? 0) - (mine.st.tyreAge ?? 0);
+      const wearDiff = o.wear !== null && mine.wear !== null ? o.wear - mine.wear : 0;
+      const gap = side === 'ahead' ? g.gapAhead : g.gapBehind;
+      if (!TYRE_NAME[o.st.visual] || gap === null || gap > 4000) continue;
+      const desc = `${o.st.tyreAge}-lap-old ${TYRE_NAME[o.st.visual]}s${o.wear !== null ? `, about ${Math.round(o.wear)}% worn` : ''}`;
+      if (side === 'ahead' && (ageDiff >= 6 || wearDiff >= 12)) add('tyres-rival', 66, 5, this.vary.pick('tra', [`${name(i)} ahead is on ${desc}. Yours are fresher. He'll fade, keep the pressure on.`, `${name(i)}'s tyres are going off, ${desc}. Stay close, the pass will come.`]));
+      else if (side === 'behind' && (ageDiff <= -6 || wearDiff <= -12)) add('tyres-rival', 64, 5, this.vary.pick('trb', [`${name(i)} behind has fresher rubber, ${desc}. Expect him to come at you.`, `Heads up, ${name(i)} is on newer tyres than you, ${desc}. Defend smart.`]));
+      else if (side === 'ahead' && ageDiff <= -6) add('tyres-rival', 50, 6, `${name(i)} ahead is on fresher tyres, ${desc}. Don't burn yours chasing him.`);
+    }
+
+    // What the last lap tells us: corners, sectors, battery.
+    const n = this.lapNotes && this.lapNotes.lap === lap - 1 ? this.lapNotes : null;
+    if (n?.coaching && !n.invalid) add('coach', n.coaching.score, 2, n.coaching.text, n.coaching.data);
+    if (n?.marks?.some((m) => m === 'purple')) add('sector', 58, 3, this.vary.pick('psec', [`Purple sector ${n.marks.indexOf('purple') + 1}! Fastest of anyone.`, `That's a purple sector ${n.marks.indexOf('purple') + 1}.`]));
+    else if (n?.marks?.some((m) => m === 'pb')) add('sector', 38, 4, `Personal best in sector ${n.marks.indexOf('pb') + 1}.`);
+    if (n?.ers) {
+      const e = n.ers;
+      const st = r.status[this.me] || {};
+      if (e.end < 25 && e.longest) add('ers', 68, 4, this.vary.pick('erl', [`Battery's down to ${e.end}%. Harvest on ${e.shortest?.name || e.longest.name}: Medium mode there${e.bigStop ? `, and lift and coast into ${e.bigStop.name}` : ''}.`, `You're running the battery flat, ${e.end}% at the line. Ease off the deploy on ${e.shortest?.name || e.longest.name} and save it for ${e.longest.name}.`]));
+      else if (e.end > 85 && e.longest && (g.gapAhead === null || g.gapAhead > 1500)) add('ers', 55, 5, this.vary.pick('erh', [`You're finishing laps with ${e.end}% battery. Use Overtake on ${e.longest.name}, that's free lap time.`, `Plenty of charge, ${e.end}%. Deploy more on ${e.longest.name}.`]));
+      else if (g.gapAhead !== null && g.gapAhead < 1500 && e.longest && e.end > 40) add('ers', 70, 3, this.vary.pick('era', [`Save the battery for ${e.longest.name}. Hit Overtake there to get alongside ${data.ahead?.name || 'him'}.`, `Attack plan: full deploy on ${e.longest.name}, then late on the brakes.`]));
+      else if (g.gapBehind !== null && g.gapBehind < 1200 && e.longest) add('ers', 60, 4, `Keep some battery to defend on ${e.longest.name}.`);
+      else if (st.ersMode !== undefined) add('ers', 30, 8, `Battery's balanced, ${e.start} to ${e.end}% over the lap. Good management.`);
+    }
+
+    // Under a safety car, no pushing advice: just the race picture.
+    const sc = r.session.safetyCar === 1 || r.session.safetyCar === 2;
+    if (sc) for (let k = t.length - 1; k >= 0; k--) if (['coach', 'ers', 'battle-ahead', 'battle-behind', 'sector'].includes(t[k].kind)) t.splice(k, 1);
+    if (!t.length) return;
+    t.sort((a, b) => b.score - a.score);
+    const first = t[0];
+    this.speakTopic(first, lap);
+    const next = t.find((x) => x !== first && x.score >= 55);
+    if (next) this.deferred = { lap, t: next };
+  }
+
+  speakTopic(x, lap) {
+    this.topicLap[x.kind] = lap;
+    this.sayAt = this.now();
+    this.calls.say(x.kind === 'coach' ? 'losing-time' : x.kind, x.data, x.text, { priority: 'normal', key: `topic-${x.kind}-${lap}` });
+  }
+
+  splitsVaried(d) {
+    const nm = (o) => o?.name;
+    const trendA = d.ahead?.changeMs, trendB = d.behind?.changeMs;
+    const closingAhead = trendA !== null && trendA !== undefined && trendA <= -200;
+    const losingBehind = trendB !== null && trendB !== undefined && trendB <= -200;
+    const opts = [() => splitsText(d)];
+    if (d.ahead && d.behind) opts.push(() => `Gap to ${nm(d.ahead)} is ${sec(d.ahead.gapMs)}${closingAhead ? `, you took ${sec(-trendA)} that lap` : ''}. ${nm(d.behind)} is ${sec(d.behind.gapMs)} back.`);
+    if (d.ahead) opts.push(() => `${nm(d.ahead)} is ${sec(d.ahead.gapMs)} up the road${closingAhead ? `, and you're reeling him in, ${sec(-trendA)} that lap` : trendA >= 200 ? `, he's pulling away, ${sec(trendA)} that lap` : ''}.${d.lapsLeft ? ` ${d.lapsLeft} to go.` : ''}`);
+    if (d.behind && losingBehind) opts.push(() => `${nm(d.behind)} is closing, ${sec(d.behind.gapMs)} behind now, ${sec(-trendB)} quicker that lap.`);
+    if (d.behind && trendB >= 200) opts.push(() => `You're pulling away from ${nm(d.behind)}, ${sec(d.behind.gapMs)} now.`);
+    return this.vary.pick(`splits${opts.length}`, opts);
   }
 
   bestSet() {
@@ -541,6 +833,7 @@ class F1Engineer {
       // One change at a time, with a few seconds between them. Say each once; say it again only
       // if you changed that setting and the problem is still there, or once more after 5 minutes.
       const kind = a.title.split(' ')[0];
+      if (kind === 'ERS') continue; // battery advice is a talking point, with the corners to use
       const value = kind === 'Brake' ? adj.bias : kind === 'On-throttle' ? adj.diffOn : null;
       const seen = this.adviceSeen[kind];
       const due = !seen || (value !== null && value !== seen.value && now - seen.at > 30000) || (!seen.repeated && now - seen.at > 300000);
@@ -618,7 +911,7 @@ class F1Engineer {
     }
     if (topic === 'time') {
       const l = this.lastLoss;
-      return this.calls.say(l ? 'losing-time' : 'answer', l || { topic }, l ? `Last lap, most time went in sector ${l.sector}, ${l.fromKm.toFixed(1)} to ${l.toKm.toFixed(1)} km: ${sec(l.lossMs, 2)} slower than ${l.ref} there. ${this.fixFor(l.seg, this.myBest?.info || this.blankLapInfo()).text}` : 'Need a full lap first to compare.', { priority: 'high', key: `ans-${this.now()}` });
+      return this.calls.say(l ? 'losing-time' : 'answer', l || { topic }, l ? this.lastLossText : 'Need a full lap first to compare.', { priority: 'high', key: `ans-${this.now()}` });
     }
     if (topic === 'weather') {
       const next = (s.forecast || []).filter((f) => f.sessionType === s.sessionType && f.minutes > 0).sort((a, b) => a.minutes - b.minutes).slice(0, 3);
@@ -638,7 +931,7 @@ class F1Engineer {
   state() {
     const p = this.calls.pending;
     const showPlan = this.isRace && !this.lightsOut && this.race.lap[this.me]?.lapNum === 1;
-    return { calls: this.calls.list.slice(-15), pending: p && this.now() - p.at < 120000 ? { id: p.id, ask: p.ask } : null, segLoss: this.segLoss, segments: SEGMENTS, leave: this.isRace ? null : this.leave, plan: showPlan ? this.plan() : null, phase: this.isRace ? (this.lightsOut ? 'race' : this.race.session.safetyCar === 3 ? 'formation' : 'grid') : this.leave?.out === false ? 'garage' : 'track' };
+    return { calls: this.calls.list.slice(-15), pending: p && this.now() - p.at < 120000 ? { id: p.id, ask: p.ask } : null, segLoss: this.segLoss, segments: this.segLoss ? this.segLoss.length : SEGMENTS, zones: this.race.coach?.state().zones || null, lossText: this.lastLossText || null, leave: this.isRace ? null : this.leave, plan: showPlan ? this.plan() : null, phase: this.isRace ? (this.lightsOut ? 'race' : this.race.session.safetyCar === 3 ? 'formation' : 'grid') : this.leave?.out === false ? 'garage' : 'track' };
   }
 }
 
@@ -647,6 +940,8 @@ function fmtClock(sec) {
   const m = Math.floor(sec / 60), s = Math.round(sec % 60);
   return m ? `${m} minute${m === 1 ? '' : 's'}${s ? ` ${s}` : ''}` : `${s} seconds`;
 }
+
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 function splitsText(d) {
   const part = (o, who) => {

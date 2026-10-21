@@ -204,3 +204,32 @@ button { font: inherit; color: inherit; }
 .card.plan dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 6px 0 0; font-size: 14px; }
 .card.plan dt { color: var(--muted); }
 .card.plan dd { margin: 0; }
+
+/* Sector times */
+.sectors table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 6px; }
+.sectors th, .sectors td { padding: 3px 6px; text-align: right; white-space: nowrap; }
+.sectors tr:first-child th { font: 600 12px/1 var(--cond); letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+.sectors th:first-child { text-align: left; font: 600 14px/1 var(--cond); color: var(--muted); }
+.sectors td { font: 600 16px/1 var(--cond); border-top: 1px solid #2a3036; }
+.sectors td small { color: var(--muted); font-size: 12px; }
+.sectors td.p { color: #c58cff; } .sectors td.g { color: var(--green); } .sectors td.y { color: var(--gold); }
+.sectors td.run { color: var(--muted); font-style: italic; }
+.sectors td.hint { text-align: left; color: var(--muted); font: 13px/1.2 var(--body); }
+.sectors tr.now td { font-size: 18px; }
+#map .turn { fill: var(--muted); font-family: var(--cond); font-weight: 600; text-anchor: middle; paint-order: stroke; stroke: var(--panel); }
+
+/* Map and sector times side by side when there's room, stacked on a phone held upright */
+.map-body { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+.map-box { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.sectors { flex: none; }
+@media (min-aspect-ratio: 1/1) and (min-width: 700px) {
+  .map-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(250px, 0.75fr); align-items: start; }
+  .map-box { height: 100%; }
+  .sectors { align-self: center; }
+}
+.sectors { overflow: hidden; }
+.sectors th, .sectors td { padding: 3px 4px; }
+.sectors td { font-size: 15px; }
+.sectors tr.now td { font-size: 17px; }
+.sectors td small { display: block; font-size: 11px; line-height: 1.1; }
+@media (min-aspect-ratio: 1/1) and (min-width: 700px) { .map-body { grid-template-columns: minmax(0, 1fr) minmax(300px, 0.9fr); } }

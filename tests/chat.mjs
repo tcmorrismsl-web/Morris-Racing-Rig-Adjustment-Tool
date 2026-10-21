@@ -58,6 +58,15 @@ assert.ok(/"position":4/.test(sys) && /NORRIS, 1\.2 s/.test(sys), 'race data in 
 assert.equal(voice.transcript[0].text, reply.say, 'reply on the radio');
 assert.equal(voice.transcript[1].text, 'You: you sound gorgeous today', 'your line shown');
 
+// Parc fermé never stops wheel advice
+chat.setWheelTargets({ brakeBias: 55, diffOn: 60, current: { brakeBias: 57, diffOn: 70 } });
+reply = { say: 'Bias back two clicks.', ask: null, flirt: false };
+await chat.talk('what should I change on the wheel', { ...d, parcFerme: { on: true }, adjust: { items: [{ title: 'Brake bias back 1% (to 55%)', text: 'Front wheels locked.' }] } }, ask);
+const pfSys = sent.filter((x) => x.url.includes('/chat/completions')).at(-1).body.messages[0].content;
+assert.ok(/Still allowed on track from the wheel\/MFD: brake bias, on-throttle differential, ERS mode/.test(pfSys), 'parc fermé allows wheel changes');
+assert.ok(/Brake bias back 1%/.test(pfSys) && /"brakeBias":55/.test(pfSys), 'current wheel suggestions and setup sheet');
+assert.ok(/parc fermé or not/.test(pfSys));
+
 // The AI can hand a request to the bridge
 reply = { say: 'Let me look.', ask: 'gaps', flirt: false };
 r = await chat.talk('how is Norris doing up there', d, ask);

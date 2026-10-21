@@ -14,7 +14,7 @@ const { parseForza, parseF1, parseF1Header } = require('./parsers');
 const { ForzaLaps, F1Laps } = require('./laps');
 const { F1Race, ForzaRace } = require('./race');
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const vm = require('vm');
 const Module = require('module');
 const arg = (name, def) => {
@@ -182,6 +182,13 @@ const server = http.createServer(async (req, res) => {
       if (!q || !topics.includes(q.ask)) return json(res, 400, { error: 'unknown question' });
       const call = dashFor(q.game).eng.ask(q.ask);
       return json(res, 200, { ok: true, call });
+    }
+    // The app's suggested wheel settings (brake bias, diff) for this session, sent by the dashboard.
+    if (p === '/api/targets' && req.method === 'POST') {
+      const q = await body(req, 2000);
+      const num = (v, lo, hi) => (Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Number(v) : null);
+      f1Race.eng.targets = q ? { brakeBias: num(q.brakeBias, 50, 70), diffOn: num(q.diffOn, 10, 100), at: Date.now() } : null;
+      return json(res, 200, { ok: true });
     }
     if (p === '/api/track') return json(res, 200, dashFor(url.searchParams.get('game')).track());
     if (p === '/dash-events') {

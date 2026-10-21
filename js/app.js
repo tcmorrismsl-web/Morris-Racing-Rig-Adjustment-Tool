@@ -1,16 +1,16 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvhlfowh';
-import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvhlfowh';
-import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvhlfowh';
-import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvhlfowh';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvhlfowh';
-import { pfState, pfSplit, PF_GARAGE, PF_WHEEL, PF_NOTE, PF_DRIVING } from './parcferme.js?v=mvhlfowh';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvhlfowh';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvhlfowh';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvi7diek';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvi7diek';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvi7diek';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvi7diek';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvi7diek';
+import { pfState, pfSplit, PF_GARAGE, PF_WHEEL, PF_NOTE, PF_DRIVING } from './parcferme.js?v=mvi7diek';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvi7diek';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvi7diek';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 21, 12:09 AM'; // set by npm run stamp
+const APP_VERSION = 'Oct 21, 10:24 AM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',

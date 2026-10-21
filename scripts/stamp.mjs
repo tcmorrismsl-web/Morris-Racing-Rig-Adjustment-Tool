@@ -21,6 +21,6 @@ for (const f of files) {
 const bridgeMin = (readFileSync('bridge/bridge.js', 'utf8').match(/const VERSION = '([\d.]+)'/) || [])[1];
 const appFiles = ['index.html', 'dash.html', 'styles.css', 'dash.css', 'icon.svg', 'manifest.webmanifest', ...readdirSync('js').filter((f) => f.endsWith('.js')).map((f) => `js/${f}`)];
 // Bridge code for bridges from 1.4.0, which update themselves (bridge.js reads these).
-const bridge = { version: bridgeMin, files: ['bridge.js', 'parsers.js', 'laps.js', 'race.js', 'engineer.js'].map((f) => `bridge/${f}`) };
+const bridge = { version: bridgeMin, files: ['bridge.js', 'parsers.js', 'laps.js', 'race.js', 'engineer.js', 'coach.js', 'corners.js'].map((f) => `bridge/${f}`) };
 writeFileSync('app-files.json', `${JSON.stringify({ version: v, label, bridgeMin, bridge, files: appFiles }, null, 2)}\n`);
 console.log(`Stamped version ${v} (${label}), needs bridge ${bridgeMin}`);

@@ -8,6 +8,7 @@
 const BUCKET_M = 10;           // track outline resolution, metres of lap distance
 const WINDOW_S = 60;           // rolling window for on-track advice, seconds of driving
 const { F1Engineer, ForzaEngineer, SEGMENTS } = require('./engineer');
+const { Coach } = require('./coach');
 const round = (v, d = 0) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : null);
 
 // ---------------------------------------------------------------------------
@@ -96,6 +97,8 @@ class F1Race {
     this.lastSeen = 0;
     this.curInvalid = false; this.lastLapInvalid = false; this.myLapNum = null;
     this.leftGarage = false;
+    this.wearAll = [];
+    this.coach = new Coach();
     this.eng = new F1Engineer(this);
   }
 
@@ -110,6 +113,7 @@ class F1Race {
     switch (m.type) {
       case 'session': {
         this.session = { ...this.session, ...m };
+        if (m.trackLength) this.coach.setTrack(m.track, m.trackId, m.trackLength);
         this.eng.onSession(m);
         if (m.trackLength && m.trackId >= 0) {
           const key = `f1-${m.trackId}`;
@@ -137,10 +141,15 @@ class F1Race {
       case 'participants': this.parts = m.cars; this.numActive = m.numActive; break;
       case 'status': this.status = m.cars; break;
       case 'setup': this.setup = m; break;
-      case 'history': this.history[m.car] = { bestLapMs: m.bestLapMs, stints: m.stints }; break;
+      case 'history': this.history[m.car] = { bestLapMs: m.bestLapMs, stints: m.stints, laps: m.laps || [] }; break;
       case 'tyreSets': if (m.car === this.player) this.tyreSets = m; break;
-      case 'damage': this.wear = m.tyreWear; break;
-      case 'telemetry': this.tel = m; break;
+      case 'damage': this.wear = m.tyreWear; this.wearAll = m.cars || []; break;
+      case 'telemetry': {
+        this.tel = m;
+        const c = this.lap[this.player];
+        if (c && c.driverStatus !== 0 && c.pitStatus === 0) this.coach.sample(c.lapNum, c.lapDistance, c.currentLapMs, m, this.status[this.player]?.ersStore ?? null);
+        break;
+      }
       case 'motionEx': this.sample(m, h.sessionTime); break;
       case 'event': this.event(m, h.sessionTime); this.eng.onEvent(m); break;
       default:
@@ -178,6 +187,12 @@ class F1Race {
       if (spin) r.add(t, 'spin');
     }
     this.eng.onSample(lockF, spin, tel.speedKmh);
+    const c = this.lap[this.player];
+    if (c && (lockF || spin) && this.coach.cur) {
+      const k = Math.floor(c.lapDistance / 10);
+      if (lockF) this.coach.cur.lock[k] = (this.coach.cur.lock[k] || 0) + 1;
+      if (spin) this.coach.cur.spin[k] = (this.coach.cur.spin[k] || 0) + 1;
+    }
   }
 
   event(m, t) {
@@ -288,6 +303,32 @@ class F1Race {
       sessionId: this.uid ? `f1-${this.uid}` : null,
       inUse: this.inUse(),
       parcFerme: this.parcFerme(),
+      sectors: this.sectors(),
+      coach: this.coach.state(),
+    };
+  }
+
+  // Sector times: this lap so far, last lap, your bests, the theoretical best and the session bests.
+  sectors() {
+    const me = this.player;
+    const c = this.lap[me];
+    if (!c) return null;
+    const done = (h) => (h?.laps || []).filter((l) => l.ms > 0 && l.s1 > 0 && l.s2 > 0 && l.s3 > 0);
+    const mine = done(this.history[me]);
+    const best = [0, 1, 2].map((k) => { const v = mine.map((l) => [l.s1, l.s2, l.s3][k]).filter((x) => x > 0); return v.length ? Math.min(...v) : null; });
+    const session = [0, 1, 2].map((k) => {
+      let m = null;
+      for (const h of Object.values(this.history)) for (const l of done(h)) { const v = [l.s1, l.s2, l.s3][k]; if (v > 0 && (m === null || v < m)) m = v; }
+      return m;
+    });
+    const last = mine.length ? mine[mine.length - 1] : null;
+    const cur = [c.sector >= 1 && c.s1Ms ? c.s1Ms : null, c.sector >= 2 && c.s2Ms ? c.s2Ms : null, null];
+    const running = c.currentLapMs ? c.currentLapMs - (cur[0] || 0) - (cur[1] || 0) : null;
+    return {
+      sector: c.sector ?? 0, cur, running,
+      last: last ? [last.s1, last.s2, last.s3] : null, lastMs: last ? last.ms : null,
+      best, theo: best.every((x) => x) ? best[0] + best[1] + best[2] : null, bestLapMs: this.history[me]?.bestLapMs || null,
+      session,
     };
   }
 
@@ -476,6 +517,7 @@ class ForzaRace {
     this.roll = new Rolling();
     this.lastSeen = 0;
     this.carOrdinal = null;
+    this.secLast = null; this.secBest = [null, null, null]; this.lapLen = null;
     this.eng = new ForzaEngineer(this);
   }
 
@@ -539,6 +581,16 @@ class ForzaRace {
     const prevBest = this.bestLap;
     const segs = p.lastLap > 0 ? segsOf(this.trace, p.lastLap) : null;
     const bestSegs = this.bestTrace && prevBest ? segsOf(this.bestTrace, prevBest) : null;
+    // Sectors: Forza doesn't send them, so the lap is split into thirds by distance.
+    if (p.lastLap > 0 && lapLen > 500) {
+      this.lapLen = lapLen;
+      const at = (f) => this.trace[Math.floor((f * lapLen) / BUCKET_M)];
+      const a = at(1 / 3), b = at(2 / 3);
+      if (a !== undefined && b !== undefined) {
+        this.secLast = [a, b - a, p.lastLap - b].map((x) => Math.round(x * 1000));
+        this.secLast.forEach((v, k) => { if (v > 0 && (this.secBest[k] === null || v < this.secBest[k])) this.secBest[k] = v; });
+      }
+    }
     if (p.lastLap > 0) this.eng.onLapDone(p.lastLap, prevBest, segs, bestSegs, p.lapNumber, Number(this.getLaps()) || null);
     if (p.lastLap > 0 && (this.bestLap === null || p.lastLap <= this.bestLap + 0.001)) {
       this.bestLap = p.lastLap;
@@ -626,6 +678,23 @@ class ForzaRace {
       },
       pit,
       adjust: { ready: n >= 300, items: tips, forza: true, mode: p.isRaceOn ? 'track' : 'garage' },
+      sectors: this.sectorsNow(p),
+    };
+  }
+
+  sectorsNow(p) {
+    const len = this.lapLen;
+    const d = p.distance - (this.lapStartDist ?? p.distance);
+    const at = (f) => this.trace[Math.floor((f * len) / BUCKET_M)];
+    const sector = len ? (d >= (2 * len) / 3 ? 2 : d >= len / 3 ? 1 : 0) : 0;
+    const s1 = len && sector >= 1 && at(1 / 3) !== undefined ? Math.round(at(1 / 3) * 1000) : null;
+    const s2 = len && sector >= 2 && at(2 / 3) !== undefined ? Math.round(at(2 / 3) * 1000) - s1 : null;
+    const best = this.secBest;
+    return {
+      sector, cur: [s1, s2, null], running: Math.round(p.currentLap * 1000) - (s1 || 0) - (s2 || 0),
+      last: this.secLast, lastMs: p.lastLap > 0 ? Math.round(p.lastLap * 1000) : null,
+      best, theo: best.every((x) => x) ? best[0] + best[1] + best[2] : null, bestLapMs: this.bestLap ? Math.round(this.bestLap * 1000) : null,
+      session: null, thirds: true,
     };
   }
 

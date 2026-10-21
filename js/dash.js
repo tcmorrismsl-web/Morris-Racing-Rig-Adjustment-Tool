@@ -1,10 +1,11 @@
 // Live race dashboard. Reads the bridge's 10-per-second race stream and draws the
 // track map, timing tower, pit options, adjustments and the race engineer.
 
-import * as voice from './voice.js?v=mvhlfowh';
-import { lapAdvice } from './advice.js?v=mvhlfowh';
-import { talk } from './chat.js?v=mvhlfowh';
-import { pfSplit } from './parcferme.js?v=mvhlfowh';
+import * as voice from './voice.js?v=mvi7diek';
+import { lapAdvice } from './advice.js?v=mvi7diek';
+import { talk, setWheelTargets } from './chat.js?v=mvi7diek';
+import { f1Setup } from './f1.js?v=mvi7diek';
+import { pfSplit } from './parcferme.js?v=mvi7diek';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -117,18 +118,42 @@ function drawCars(m) {
 function drawLoss(e) {
   const g = $('loss');
   const loss = e?.segLoss;
+  drawTurns(e);
   if (!loss || !map.box || map.points.length < 20) { g.innerHTML = ''; return; }
   const n = loss.length, pts = map.points;
+  // Corner zones have their own lengths; otherwise the lap is in equal parts.
+  const zones = e.zones && e.zones.length === n && last?.session?.trackLength ? e.zones : null;
+  const len = last?.session?.trackLength || 1;
   let html = '';
   loss.forEach((ms, k) => {
     if (ms < 60) return;
-    const a = Math.floor((k / n) * pts.length), b = Math.min(pts.length - 1, Math.ceil(((k + 1) / n) * pts.length));
+    const a = zones ? Math.floor((zones[k].from / len) * pts.length) : Math.floor((k / n) * pts.length);
+    const b = Math.min(pts.length - 1, zones ? Math.ceil((zones[k].to / len) * pts.length) : Math.ceil(((k + 1) / n) * pts.length));
     const seg = pts.slice(a, b + 1).map(([x, z]) => project(x, z).map((v) => v.toFixed(1)).join(' '));
     if (seg.length < 2) return;
     const strong = Math.min(1, ms / 400);
     html += `<path class="loss-seg" d="M${seg.join('L')}" stroke="rgba(255,${Math.round(176 - 110 * strong)},32,${(0.55 + 0.45 * strong).toFixed(2)})" stroke-width="${(5 + 5 * strong).toFixed(1)}"/>`;
   });
   g.innerHTML = html;
+}
+
+// Corner numbers on the map, so "Turn 4" means something at a glance.
+let turnsKey = '';
+function drawTurns(e) {
+  const g = $('turns');
+  const zones = e?.zones;
+  const len = last?.session?.trackLength;
+  const key = `${map.key}|${map.version}|${flip}|${zones?.length}`;
+  if (key === turnsKey) return;
+  turnsKey = key;
+  if (!zones || !zones.length || !zones[0].labels?.length || !len || !map.box || !map.closed) { g.innerHTML = ''; return; }
+  const pts = map.points, size = Math.max(map.box.w, map.box.h), fs = size * 0.042;
+  g.innerHTML = zones.map((z) => {
+    const p = pts[Math.min(pts.length - 1, Math.round((z.apex / len) * pts.length))];
+    if (!p) return '';
+    const [x, y] = project(p[0], p[1]);
+    return `<text class="turn" x="${x.toFixed(1)}" y="${(y - fs * 0.9).toFixed(1)}" font-size="${fs.toFixed(1)}" style="stroke-width:${(fs * 0.22).toFixed(1)}px">${esc(z.labels[0])}</text>`;
+  }).join('');
 }
 
 $('flip').addEventListener('click', () => {
@@ -187,6 +212,26 @@ function renderForzaTiming(d) {
       <div><span>Speed</span><b>${s.speedKmh !== undefined ? Math.round(s.speedKmh * 0.621371) : '–'} <small>mph</small></b></div>
     </div>
     <p class="small">Forza only sends data for your own car, so there's no field, gaps or rivals here.${s.totalLaps ? '' : ' Set the race laps on the Setup tab to see laps remaining.'}</p>`;
+}
+
+// Sector times: purple = fastest of anyone, green = your best, yellow = slower.
+const fmtSecT = (ms) => (ms === null || ms === undefined || ms <= 0 ? '–' : ms >= 60000 ? fmtLap(ms) : (ms / 1000).toFixed(3));
+function renderSectors(d) {
+  const x = d.sectors;
+  const el = $('sectors');
+  if (!x) { el.innerHTML = ''; return; }
+  const cls = (v, k) => (!v ? '' : x.session && x.session[k] && v <= x.session[k] ? 'p' : x.best[k] && v <= x.best[k] ? 'g' : 'y');
+  const cell = (v, k) => `<td class="${cls(v, k)}">${fmtSecT(v)}</td>`;
+  const now = [0, 1, 2].map((k) => (x.cur[k] ? cell(x.cur[k], k) : k === x.sector && x.running > 0 ? `<td class="run">${fmtSecT(x.running)}</td>` : '<td>–</td>')).join('');
+  const lastDelta = x.lastMs && x.bestLapMs && x.lastMs !== x.bestLapMs ? ` <small>+${((x.lastMs - x.bestLapMs) / 1000).toFixed(3)}</small>` : '';
+  el.innerHTML = `<table>
+    <tr><th></th><th>S1</th><th>S2</th><th>S3</th><th>Lap</th></tr>
+    <tr class="now"><th>Now</th>${now}<td></td></tr>
+    <tr><th>Last</th>${x.last ? x.last.map(cell).join('') : '<td>–</td><td>–</td><td>–</td>'}<td>${fmtLap(x.lastMs)}${lastDelta}</td></tr>
+    <tr><th>Best</th>${x.best.map((v, k) => `<td class="${x.session && x.session[k] && v && v <= x.session[k] ? 'p' : 'g'}">${fmtSecT(v)}</td>`).join('')}<td>${fmtLap(x.bestLapMs)}</td></tr>
+    <tr><th>Ideal</th><td colspan="3" class="hint">${x.theo && x.bestLapMs && x.bestLapMs - x.theo > 20 ? `${((x.bestLapMs - x.theo) / 1000).toFixed(3)} on the table` : 'Your best sectors together'}</td><td>${fmtLap(x.theo)}</td></tr>
+    ${x.session ? `<tr><th>Fastest</th>${x.session.map((v) => `<td class="p">${fmtSecT(v)}</td>`).join('')}<td></td></tr>` : ''}
+  </table>${x.thirds ? '<p class="small">Forza doesn\'t send sectors, so these are thirds of the lap.</p>' : ''}`;
 }
 
 const card = (x) => `<div class="card ${x.level}"><b>${esc(x.title)}</b>${x.text ? `<p>${esc(x.text)}</p>` : ''}</div>`;
@@ -349,6 +394,22 @@ voice.onSpeaking((on) => $('eng-power').classList.toggle('talking', on));
 // Any tap on the page also unlocks the radio click on phones.
 document.addEventListener('pointerdown', () => voice.unlockAudio(), { once: true });
 
+// The app's suggested brake bias and diff for this session, so the engineer and chat can use them.
+let targetsAt = 0;
+function syncTargets(d) {
+  const u = d.inUse;
+  if (d.game !== 'f1' || !u || !u.track || Date.now() - targetsAt < 30000) return;
+  targetsAt = Date.now();
+  let style = 'balanced';
+  try { style = JSON.parse(localStorage.getItem('morris-racing-v1'))?.f1?.style || style; } catch { /* default */ }
+  try {
+    const rec = f1Setup({ era: u.era, track: u.track, session: u.session || 'race', weather: u.weather || 'dry', compound: u.compound || undefined, laps: u.totalLaps || 0, style });
+    const t = { brakeBias: rec.v.brakeBias, diffOn: rec.v.diffOn, current: { brakeBias: u.setup?.brakeBias ?? null, diffOn: u.setup?.diffOn ?? null } };
+    setWheelTargets(t);
+    fetch('api/targets', { method: 'POST', body: JSON.stringify(t) }).catch(() => {});
+  } catch { /* track not in the app's list */ }
+}
+
 async function ask(topic) {
   try {
     await fetch('api/engineer', { method: 'POST', body: JSON.stringify({ game, ask: topic }) });
@@ -447,13 +508,26 @@ $('eng-settings').addEventListener('click', () => {
   showEngine();
   $('set-style').innerHTML = voice.STYLES.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
   $('set-style').value = voice.settings.style;
-  $('set-radio').checked = voice.settings.radio;
+  $('set-radio-sound').value = voice.settings.radioSound || 'f1';
+  showSound();
   $('set-chat').value = voice.settings.chat;
   $('set-name').value = voice.settings.name;
   $('set-rate').value = voice.settings.rate;
   $('eng-dialog').showModal();
 });
-$('set-radio').addEventListener('change', (e) => { voice.settings.radio = e.target.checked; voice.saveSettings(); });
+// Radio sound: F1-style chime, static click, your own clip, or off.
+$('set-radio-sound').innerHTML = voice.RADIO_SOUNDS.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
+const showSound = () => { $('custom-sound').hidden = $('set-radio-sound').value !== 'custom'; };
+$('set-radio-sound').addEventListener('change', (e) => { voice.settings.radioSound = e.target.value; voice.saveSettings(); showSound(); });
+$('set-sound-file').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  if (f.size > 1500000) { $('sound-file-note').textContent = 'That file is too big. Use a clip under 1.5 MB.'; return; }
+  const r = new FileReader();
+  r.onload = () => { $('sound-file-note').textContent = voice.setCustomSound(r.result) ? `Using ${f.name}.` : 'Could not save it on this device.'; voice.testChime(); };
+  r.readAsDataURL(f);
+});
+$('set-chime').addEventListener('click', () => voice.testChime());
 for (const [id, key, num] of [['set-style', 'style'], ['set-chat', 'chat'], ['set-voice', 'voice'], ['set-name', 'name'], ['set-rate', 'rate', true]]) {
   $(id).addEventListener('change', (e) => { voice.settings[key] = num ? Number(e.target.value) : e.target.value.trim(); voice.saveSettings(); });
 }
@@ -488,8 +562,9 @@ function onDash(d) {
   }
   const now = performance.now();
   if (now - towerAt > 250) { towerAt = now; renderTower(d); }
-  if (now - panelsAt > 500) { panelsAt = now; renderPit(d); renderAdjust(d); }
+  if (now - panelsAt > 500) { panelsAt = now; renderPit(d); renderAdjust(d); renderSectors(d); }
   renderEngineer(d);
+  syncTargets(d);
 }
 
 // Keep the screen on while the dashboard is open.

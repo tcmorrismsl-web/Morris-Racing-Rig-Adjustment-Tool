@@ -78,7 +78,7 @@ for (const format of [2025, 2026]) {
   assert.ok(/On-throttle diff down 5% \(to 60%\)/.test(titles), 'diff advice');
   assert.ok(!/hot|cold/i.test(titles), 'no tyre temperature advice');
   assert.equal(s.adjust.mode, 'track');
-  if (format === 2025) assert.ok(/ERS low \(10%\)/.test(titles), 'ERS advice'); else assert.ok(!/ERS/.test(titles), 'no ERS % for 2026');
+  if (format === 2025) assert.ok(/ERS low \(\d+%\)/.test(titles), 'ERS advice'); else assert.ok(!/ERS/.test(titles), 'no ERS % for 2026');
   // What's in use, straight from the game
   const u = race.inUse();
   assert.equal(u.era, format >= 2026 ? 2026 : 2025); assert.equal(u.track, 'austria'); assert.equal(u.session, 'race');

@@ -52,7 +52,7 @@ async function runLauncher(bridgeJs, port, marker) {
   const ver = '9.9.9';
   rmSync(join(site, 'bridge'), { recursive: true, force: true });
   mkdirSync(join(site, 'bridge'), { recursive: true });
-  for (const f of ['bridge.js', 'parsers.js', 'laps.js', 'race.js', 'engineer.js']) writeFileSync(join(site, 'bridge', f), readFileSync(join('bridge', f)));
+  for (const f of ['bridge.js', 'parsers.js', 'laps.js', 'race.js', 'engineer.js', 'coach.js', 'corners.js']) writeFileSync(join(site, 'bridge', f), readFileSync(join('bridge', f)));
   writeFileSync(join(site, 'bridge', 'bridge.js'), bridgeJs(readFileSync('bridge/bridge.js', 'utf8').replace(/const VERSION = '[\d.]+'/, `const VERSION = '${ver}'`)));
   writeFileSync(join(site, 'app-files.json'), JSON.stringify({ ...local, version: (parseInt(local.version, 36) + 2000).toString(36), label: marker, bridgeMin: local.bridgeMin, bridge: { version: ver, files: local.bridge.files } }));
   const data = mkdtempSync(join(tmpdir(), 'mr-data-'));

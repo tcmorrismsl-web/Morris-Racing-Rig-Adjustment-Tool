@@ -49,7 +49,7 @@ class F1Sim {
   // gridS: seconds sat on the grid before the start (the last formationS of them on the formation lap),
   // then lights out. parcFerme / weekend: the game's parc fermé option and the weekend's session list.
   constructor({ format = 2025, totalLaps = 15, active = 20, player = 4, uid = 777n, sessionType = 15, garageUntil = 0, weatherAt = null, scAt = null, slowZone = null, gridS = 0, formationS = 0, parcFerme = false, weekend = [] } = {}) {
-    this.gridS = gridS; this.formationS = formationS; this.grid = gridS > 0; this.parcFerme = parcFerme; this.weekend = weekend;
+    this.gridS = gridS; this.formationS = formationS; this.ersHigh = false; this.grid = gridS > 0; this.parcFerme = parcFerme; this.weekend = weekend;
     this.format = format; this.n = carsIn(format); this.totalLaps = totalLaps; this.active = active; this.player = player; this.uid = uid;
     this.sessionType = sessionType; this.garageUntil = garageUntil; this.weatherAt = weatherAt; this.scAt = scAt; this.slowZone = slowZone;
     this.quali = sessionType >= 5 && sessionType <= 14;
@@ -86,7 +86,11 @@ class F1Sim {
       // Optional slow zone for the player (e.g. a missed braking point): [fromM, toM, factor]
       if (this.slowZone && c.i === this.player) { const ld = ((c.dist % TRACK_LEN) + TRACK_LEN) % TRACK_LEN; if (ld >= this.slowZone[0] && ld < this.slowZone[1]) v *= this.slowZone[2]; }
       if (this.sc) v = Math.min(v, 45);
+      const ldBefore = ((c.dist % lapT) + lapT) % lapT;
       c.dist += v * dt;
+      const ldAfter = ((c.dist % lapT) + lapT) % lapT;
+      if (c.dist > 0 && ldBefore < lapT / 3 && ldAfter >= lapT / 3) c.s1 = Math.round((this.t - c.lapStartT) * 1000);
+      if (c.dist > 0 && ldBefore < (2 * lapT) / 3 && ldAfter >= (2 * lapT) / 3) c.s2 = Math.round((this.t - c.lapStartT) * 1000) - (c.s1 || 0);
       const after = Math.floor(c.dist / lapT);
       if (after > before && c.dist > 0) {
         const lapMs = Math.round((this.t - c.lapStartT) * 1000);
@@ -94,7 +98,7 @@ class F1Sim {
           c.lastLapMs = lapMs; c.laps.push(lapMs);
           if (!c.bestMs || lapMs < c.bestMs) c.bestMs = lapMs;
         }
-        c.lapStartT = this.t; c.tyreAge++; c.out = false;
+        c.lapStartT = this.t; c.tyreAge++; c.out = false; c.s1 = 0; c.s2 = 0;
         if (c.pit) { c.pit = 0; }
       }
     }
@@ -162,6 +166,7 @@ class F1Sim {
       const lapDist = ((c.dist % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
       body.writeUInt32LE(c.lastLapMs, o);
       body.writeUInt32LE(Math.max(0, Math.round((this.t - c.lapStartT) * 1000)), o + 4);
+      body.writeUInt16LE((c.s1 || 0) % 60000, o + 8); body.writeUInt16LE((c.s2 || 0) % 60000, o + 11);
       body.writeUInt16LE(gapAhead % 60000, o + 14); body.writeUInt8(Math.floor(gapAhead / 60000), o + 16);
       body.writeUInt16LE(gapLeader % 60000, o + 17); body.writeUInt8(Math.floor(gapLeader / 60000), o + 19);
       body.writeFloatLE(c.garage ? 0 : c.dist < 0 ? c.dist : lapDist, o + 20);
@@ -204,7 +209,8 @@ class F1Sim {
       body.writeFloatLE(40, o + 5); body.writeFloatLE(110, o + 9); body.writeFloatLE(i === this.player ? 0.4 : 1, o + 13);
       body.writeUInt8(c.compound, o + 25); body.writeUInt8(c.visual, o + 26); body.writeUInt8(c.tyreAge, o + 27);
       body.writeInt8(0, o + 28);
-      body.writeFloatLE(i === this.player ? 400000 : 2000000, o + 37); // player ERS at 10%
+      const me = this.cars[this.player], ld = ((me.dist % TRACK_LEN) + TRACK_LEN) % TRACK_LEN;
+      body.writeFloatLE(i === this.player ? (this.ersHigh ? 3600000 : 330000) + 200000 * Math.sin(ld / TRACK_LEN * 6.28) : 2000000, o + 37); // player ERS low (or high)
       body.writeUInt8(2, o + (this.format >= 2026 ? 45 : 41));
     });
     return Buffer.concat([header(this.format, 7, this.t, this.player, this.uid), body]);
@@ -228,7 +234,10 @@ class F1Sim {
     b.writeUInt8(i, 29); b.writeUInt8(c.laps.length, 30); b.writeUInt8(c.stints.length + 1, 31);
     const bestIdx = c.laps.length ? c.laps.indexOf(Math.min(...c.laps)) : -1;
     b.writeUInt8(bestIdx + 1, 32);
-    c.laps.slice(0, 100).forEach((ms, k) => { b.writeUInt32LE(ms, 36 + k * 14); b.writeUInt8(15, 36 + k * 14 + 13); });
+    c.laps.slice(0, 100).forEach((ms, k) => {
+      const o = 36 + k * 14, s1 = Math.round(ms * 0.31), s2 = Math.round(ms * 0.36), s3 = ms - s1 - s2;
+      b.writeUInt32LE(ms, o); b.writeUInt16LE(s1 % 60000, o + 4); b.writeUInt8(Math.floor(s1 / 60000), o + 6); b.writeUInt16LE(s2 % 60000, o + 7); b.writeUInt8(Math.floor(s2 / 60000), o + 9); b.writeUInt16LE(s3 % 60000, o + 10); b.writeUInt8(Math.floor(s3 / 60000), o + 12); b.writeUInt8(15, o + 13);
+    });
     [...c.stints, { endLap: 255, compound: c.compound, visual: c.visual }].slice(0, 8).forEach((s, k) => {
       b.writeUInt8(s.endLap, 1436 + k * 3); b.writeUInt8(s.compound, 1437 + k * 3); b.writeUInt8(s.visual, 1438 + k * 3);
     });
@@ -271,6 +280,7 @@ class F1Sim {
   damage(wear) {
     const stride = (this.format >= 2026 ? 1133 - 29 : 1041 - 29) / this.n;
     const body = Buffer.alloc(this.n * stride);
+    this.cars.forEach((c, i) => { const w = 3 + c.tyreAge * (i % 3 ? 2.2 : 3.4); [w, w, w * 0.8, w * 0.8].forEach((v, k) => body.writeFloatLE(v, i * stride + k * 4)); });
     [wear[2], wear[3], wear[0], wear[1]].forEach((v, k) => body.writeFloatLE(v, this.player * stride + k * 4));
     return Buffer.concat([header(this.format, 10, this.t, this.player, this.uid), body]);
   }

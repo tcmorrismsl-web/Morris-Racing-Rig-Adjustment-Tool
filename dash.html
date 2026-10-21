@@ -8,8 +8,9 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://api.openai.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=mvhlfowh">
+  <link rel="stylesheet" href="dash.css?v=mvi7diek">
 </head>
 <body data-game="f1">
   <header class="bar">
@@ -22,13 +23,19 @@
   <main class="grid">
     <section class="panel map-panel" aria-label="Track map">
       <div class="panel-head"><h2>Track</h2><button type="button" class="mini" id="flip" title="Mirror the map if it looks back to front">Flip</button></div>
+      <div class="map-body">
+      <div class="map-box">
       <svg id="map" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Track map with car positions">
         <path id="outline" class="outline" d=""/>
         <path id="outline-in" class="outline-in" d=""/>
         <g id="loss"></g>
+        <g id="turns"></g>
         <g id="dots"></g>
       </svg>
       <p class="map-note" id="map-note"></p>
+      </div>
+      <div class="sectors" id="sectors" aria-label="Sector times"></div>
+      </div>
     </section>
 
     <section class="panel tower-panel" aria-label="Timing">
@@ -94,7 +101,13 @@
       <label class="fld" id="device-voice"><span>Device voice</span><select id="set-voice"></select></label>
       <label class="fld"><span>She calls you</span><input type="text" id="set-name" maxlength="20" placeholder="Leave blank for handsome, love, darling…"></label>
       <label class="fld"><span>Speed</span><input type="range" id="set-rate" min="0.8" max="1.2" step="0.05"></label>
-      <label class="fld check"><input type="checkbox" id="set-radio"> <span>Radio click before each call</span></label>
+      <label class="fld"><span>Radio sound before each call</span><select id="set-radio-sound"></select></label>
+      <div id="custom-sound" class="fld" hidden>
+        <span>Your sound clip (a second or two, MP3 or WAV)</span>
+        <input type="file" id="set-sound-file" accept="audio/*">
+        <span class="small" id="sound-file-note"></span>
+      </div>
+      <div class="dlg-actions"><button type="button" class="mini" id="set-chime">Play radio sound</button></div>
       <p class="small" id="device-tip">Smoothest device voices: on a laptop, Microsoft Edge's "Natural" voices (Ava, Emma, Jenny). On iPhone, download an Enhanced or Premium English voice in Settings, Accessibility, Spoken Content, Voices, then pick it here if it's listed.</p>
       <div class="dlg-actions"><button type="button" class="mini" id="set-test">Test voice</button></div>
       <h3>Talking to her</h3>
@@ -113,6 +126,6 @@
     <a class="btn" href="./">Back to the app</a>
   </div>
 
-  <script type="module" src="js/dash.js?v=mvhlfowh"></script>
+  <script type="module" src="js/dash.js?v=mvi7diek"></script>
 </body>
 </html>

@@ -1,15 +1,17 @@
 {
-  "version": "mvhlfowh",
-  "label": "Oct 21, 12:09 AM",
-  "bridgeMin": "1.4.0",
+  "version": "mvi7diek",
+  "label": "Oct 21, 10:24 AM",
+  "bridgeMin": "1.5.0",
   "bridge": {
-    "version": "1.4.0",
+    "version": "1.5.0",
     "files": [
       "bridge/bridge.js",
       "bridge/parsers.js",
       "bridge/laps.js",
       "bridge/race.js",
-      "bridge/engineer.js"
+      "bridge/engineer.js",
+      "bridge/coach.js",
+      "bridge/corners.js"
     ]
   },
   "files": [

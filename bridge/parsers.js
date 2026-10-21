@@ -293,6 +293,8 @@ function parseF1(b) {
       const o = HEADER + pi * stride;
       out.type = 'damage';
       out.tyreWear = reorder(f4(b, o)); // percent worn
+      out.cars = [];
+      for (let i = 0; i < cars; i++) out.cars.push(reorder(f4(b, HEADER + i * stride))); // every car's tyre wear
       return out;
     }
     case 13: { // Motion ex: player car only
@@ -315,6 +317,13 @@ function parseF1(b) {
       const bestLapNum = b.readUInt8(32);
       out.numLaps = numLaps;
       out.bestLapMs = bestLapNum > 0 && bestLapNum <= 100 ? b.readUInt32LE(36 + (bestLapNum - 1) * 14) : 0;
+      // Every lap so far with its sector times (the current lap is included, partly filled).
+      const sec = (o) => b.readUInt16LE(o) + b.readUInt8(o + 2) * 60000;
+      out.laps = [];
+      for (let k = 0; k < Math.min(numLaps, 100); k++) {
+        const o = 36 + k * 14;
+        out.laps.push({ ms: b.readUInt32LE(o), s1: sec(o + 4), s2: sec(o + 7), s3: sec(o + 10), valid: (b.readUInt8(o + 13) & 1) === 1 });
+      }
       out.stints = [];
       for (let k = 0; k < Math.min(numStints, 8); k++) {
         const o = 1436 + k * 3;
