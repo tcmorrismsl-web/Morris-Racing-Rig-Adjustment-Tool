@@ -5,7 +5,7 @@
 
 const STORE = 'mr-engineer';
 const defaults = { v: 2, on: false, style: 'fiery', chat: 'normal', voice: '', name: '', rate: 1, volume: 1, radio: true,
-  engine: 'device', okey: '', ovoice: 'marin', usage: { month: '', chars: 0 } };
+  engine: 'device', okey: '', ovoice: 'marin', sound: '', usage: { month: '', chars: 0 } };
 export const settings = (() => {
   let s;
   try { s = { ...defaults, ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch { s = { ...defaults }; }
@@ -257,6 +257,13 @@ const INSTRUCTIONS = {
   straight: 'You are a calm, professional race engineer on team radio. Speak clearly and concisely at a steady pace.',
 };
 const URGENT = ' This call is urgent: say it sharp, punchy and with real energy.';
+// The chosen style, plus anything the driver wrote in "How she sounds" (that wins if they clash).
+export function instructionsFor(call = {}) {
+  const own = (settings.sound || '').trim().slice(0, 600);
+  return (INSTRUCTIONS[settings.style] || INSTRUCTIONS.straight)
+    + (own ? ` Most importantly, follow this description of how to sound, even where it differs from the above: ${own}` : '')
+    + (call.priority === 'high' ? URGENT : '');
+}
 const useOpenAI = () => settings.engine === 'openai' && !!settings.okey;
 const audioCache = new Map(); // text -> Promise<blob URL>
 // Rough cost guide: about 1.5 cents per minute of speech, about 15 characters a second.
@@ -264,7 +271,7 @@ export const costEstimate = (chars) => (chars / 15 / 60) * 0.015;
 
 export function openaiAudio(text, call = {}) {
   const spoken = speechify(text);
-  const key = `${settings.ovoice}|${settings.style}|${call.priority === 'high'}|${spoken}`;
+  const key = `${settings.ovoice}|${settings.style}|${settings.sound}|${call.priority === 'high'}|${spoken}`;
   if (audioCache.has(key)) return audioCache.get(key);
   const job = (async () => {
     const res = await fetch('https://api.openai.com/v1/audio/speech', {
@@ -274,7 +281,7 @@ export function openaiAudio(text, call = {}) {
         model: 'gpt-4o-mini-tts',
         voice: settings.ovoice || 'marin',
         input: spoken.slice(0, 4000),
-        instructions: (INSTRUCTIONS[settings.style] || INSTRUCTIONS.straight) + (call.priority === 'high' ? URGENT : ''),
+        instructions: instructionsFor(call),
         response_format: 'mp3',
         speed: Math.max(0.5, Math.min(1.5, settings.rate)),
       }),

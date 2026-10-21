@@ -3,8 +3,8 @@
 // Absolute values use Forza's own slider scales; items Forza scales per car
 // (springs, ride height, aero, gearing) are given as changes from the car's default tune.
 
-import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvhj8433';
-import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvhj8433';
+import { FORZA_TRACKS, FORZA_CLASSES } from './data.js?v=mvhjp0ub';
+import { classFromPi, hasPart, PARTS, TYRES } from './garage.js?v=mvhjp0ub';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const r1 = (v) => Math.round(v * 10) / 10;

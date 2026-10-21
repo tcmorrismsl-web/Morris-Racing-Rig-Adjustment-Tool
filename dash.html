@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=mvhj8433">
+  <link rel="stylesheet" href="dash.css?v=mvhjp0ub">
 </head>
 <body data-game="f1">
   <header class="bar">
@@ -79,6 +79,9 @@
       <div id="openai-box">
         <label class="fld"><span>OpenAI API key</span><input type="password" id="set-okey" autocomplete="off" spellcheck="false" placeholder="sk-…"></label>
         <label class="fld"><span>Her voice</span><select id="set-ovoice"></select></label>
+        <label class="fld"><span>How she sounds (optional)</span>
+          <textarea id="set-sound" rows="3" maxlength="600" placeholder="e.g. Southern accent, laid-back, laughs a little when she teases me. Gets loud and excited when I gain a place."></textarea></label>
+        <div class="sound-ideas" id="sound-ideas"></div>
         <p class="small">The key stays on this device and is only sent to OpenAI. Set a monthly spending limit in your OpenAI account so it can never run away. <span id="usage"></span></p>
         <p class="small warn" id="engine-error" hidden></p>
       </div>
@@ -105,6 +108,6 @@
     <a class="btn" href="./">Back to the app</a>
   </div>
 
-  <script type="module" src="js/dash.js?v=mvhj8433"></script>
+  <script type="module" src="js/dash.js?v=mvhjp0ub"></script>
 </body>
 </html>

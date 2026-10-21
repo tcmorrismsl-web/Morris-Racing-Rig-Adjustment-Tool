@@ -81,6 +81,15 @@ assert.equal(v.phrase({ kind: 'pos-lost', priority: 'normal', text: 'Lost one to
   assert.deepEqual(spoken, ['Weather is dry.']);
   assert.ok(/key not accepted/.test(err), err);
   assert.ok(v.costEstimate(7000) < 0.15, 'a race costs pennies');
+  // Driver's own description goes to OpenAI and changes the cached line
+  fail = false;
+  v.settings.sound = 'Southern accent, laid-back.';
+  v.speak('Box box. 0.75 to Norris.', { priority: 'high' });
+  await new Promise((r) => setTimeout(r, 30));
+  const last = calls.at(-1).body.instructions;
+  assert.ok(/Southern accent, laid-back\./.test(last) && /urgent/.test(last), last);
+  assert.equal(calls.filter((x) => x.body.input.startsWith('Box box')).length, 2, 'new description, new audio');
+  v.settings.sound = '';
   console.log('OK: OpenAI voice checks passed; 7,000 characters ≈ $' + v.costEstimate(7000).toFixed(3));
 }
 console.log('OK: voice checks passed');

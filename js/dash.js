@@ -1,8 +1,8 @@
 // Live race dashboard. Reads the bridge's 10-per-second race stream and draws the
 // track map, timing tower, pit options, adjustments and the race engineer.
 
-import * as voice from './voice.js?v=mvhj8433';
-import { lapAdvice } from './advice.js?v=mvhj8433';
+import * as voice from './voice.js?v=mvhjp0ub';
+import { lapAdvice } from './advice.js?v=mvhjp0ub';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -376,11 +376,29 @@ $('set-okey').addEventListener('change', (e) => {
   showEngine();
 });
 $('set-ovoice').addEventListener('change', (e) => { voice.settings.ovoice = e.target.value; voice.saveSettings(); });
+const SOUND_IDEAS = [
+  ['Southern', 'Warm Southern accent, laid-back and sweet, with a little laugh when she teases.'],
+  ['British', 'Polished British accent, cheeky and confident, like a real F1 pit wall.'],
+  ['Hype', 'Very excited and loud, cheers on every overtake, like she is jumping on the pit wall.'],
+  ['Whisper', 'Close to the mic, soft and breathy, like a private message just for him.'],
+  ['Cool', 'Calm and unbothered, a dry sense of humour, never rushed even in a crisis.'],
+];
+$('sound-ideas').innerHTML = SOUND_IDEAS.map(([l]) => `<button type="button" class="mini" data-idea="${esc(l)}">${esc(l)}</button>`).join('') + '<button type="button" class="mini" data-idea="">Clear</button>';
+$('sound-ideas').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-idea]');
+  if (!b) return;
+  const idea = SOUND_IDEAS.find(([l]) => l === b.dataset.idea);
+  $('set-sound').value = idea ? idea[1] : '';
+  voice.settings.sound = $('set-sound').value;
+  voice.saveSettings();
+});
+$('set-sound').addEventListener('input', (e) => { voice.settings.sound = e.target.value; voice.saveSettings(); });
 $('eng-settings').addEventListener('click', () => {
   fillVoices();
   $('set-engine').value = voice.settings.engine;
   $('set-okey').value = voice.settings.okey;
   $('set-ovoice').value = voice.settings.ovoice;
+  $('set-sound').value = voice.settings.sound || '';
   showEngine();
   $('set-style').innerHTML = voice.STYLES.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
   $('set-style').value = voice.settings.style;

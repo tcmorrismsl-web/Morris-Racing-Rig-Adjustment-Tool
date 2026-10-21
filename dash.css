@@ -159,7 +159,7 @@ button { font: inherit; color: inherit; }
 .eng-dialog h2 { margin: 0 0 10px; font: 700 22px/1.1 var(--cond); color: var(--accent); }
 .eng-dialog h3 { margin: 18px 0 6px; font: 600 17px/1.2 var(--cond); }
 .fld { display: grid; gap: 4px; margin: 10px 0; font-size: 14px; color: var(--muted); }
-.fld select, .fld input[type="text"], .fld input[type="password"] { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+.fld select, .fld textarea, .fld input[type="text"], .fld input[type="password"] { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
 .fld.check { display: flex; align-items: center; gap: 8px; color: var(--text); }
 .fld.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
@@ -172,3 +172,5 @@ button { font: inherit; color: inherit; }
 
 .small.warn { color: #ffb347; }
 .eng-dialog [hidden] { display: none !important; }
+.fld textarea { resize: vertical; line-height: 1.35; }
+.sound-ideas { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 10px; }
