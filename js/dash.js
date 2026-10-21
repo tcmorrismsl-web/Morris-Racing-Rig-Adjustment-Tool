@@ -1,8 +1,8 @@
 // Live race dashboard. Reads the bridge's 10-per-second race stream and draws the
 // track map, timing tower, pit options, adjustments and the race engineer.
 
-import * as voice from './voice.js?v=mvhhorbr';
-import { lapAdvice } from './advice.js?v=mvhhorbr';
+import * as voice from './voice.js?v=mvhieha6';
+import { lapAdvice } from './advice.js?v=mvhieha6';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -308,9 +308,13 @@ setPower(voice.settings.on);
 $('eng-power').addEventListener('click', () => {
   const on = !voice.settings.on;
   setPower(on);
-  // Phones only allow speech that starts from a tap, so say hello now.
-  if (on) voice.speak(voice.settings.style === 'flirty' ? `Hey ${voice.settings.name || 'handsome'}. I'm here. Ask me anything.` : 'Engineer on. Radio check.');
+  // Phones only allow sound that starts from a tap, so unlock audio and say hello now.
+  voice.unlockAudio();
+  if (on) voice.speak({ fiery: `Hey ${voice.settings.name || 'superstar'}! I'm here, loud and clear. Let's go!`, sultry: `Hey ${voice.settings.name || 'handsome'}. I'm here. Ask me anything.` }[voice.settings.style] || 'Engineer on. Radio check.');
 });
+voice.onSpeaking((on) => $('eng-power').classList.toggle('talking', on));
+// Any tap on the page also unlocks the radio click on phones.
+document.addEventListener('pointerdown', () => voice.unlockAudio(), { once: true });
 
 async function ask(topic) {
   try {
@@ -345,16 +349,22 @@ function fillVoices() {
 if ('speechSynthesis' in window) speechSynthesis.addEventListener?.('voiceschanged', fillVoices);
 $('eng-settings').addEventListener('click', () => {
   fillVoices();
+  $('set-style').innerHTML = voice.STYLES.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
   $('set-style').value = voice.settings.style;
+  $('set-radio').checked = voice.settings.radio;
   $('set-chat').value = voice.settings.chat;
   $('set-name').value = voice.settings.name;
   $('set-rate').value = voice.settings.rate;
   $('eng-dialog').showModal();
 });
+$('set-radio').addEventListener('change', (e) => { voice.settings.radio = e.target.checked; voice.saveSettings(); });
 for (const [id, key, num] of [['set-style', 'style'], ['set-chat', 'chat'], ['set-voice', 'voice'], ['set-name', 'name'], ['set-rate', 'rate', true]]) {
   $(id).addEventListener('change', (e) => { voice.settings[key] = num ? Number(e.target.value) : e.target.value.trim(); voice.saveSettings(); });
 }
-$('set-test').addEventListener('click', () => voice.speak(voice.phrase({ kind: 'splits', priority: 'normal', text: 'P4, 6 to go. NORRIS 1.2 ahead, you took 0.3 off him. RUSSELL 0.9 behind.', data: {} })));
+$('set-test').addEventListener('click', () => {
+  voice.unlockAudio();
+  voice.speak(voice.phrase({ kind: 'splits', priority: 'normal', text: 'P4, 6 to go. NORRIS 1.2 ahead, you took 0.3 off him. RUSSELL 0.9 behind.', data: { ahead: { changeMs: -300 } } }));
+});
 
 // ---------------------------------------------------------------------------
 // Stream

@@ -11,7 +11,7 @@ const dir = join(stage, 'MorrisRacingBridge');
 mkdirSync(join(dir, 'bridge'), { recursive: true });
 mkdirSync(join(dir, 'js'), { recursive: true });
 
-for (const f of ['index.html', 'styles.css', 'dash.html', 'dash.css', 'icon.svg', 'manifest.webmanifest']) cpSync(join(root, f), join(dir, f));
+for (const f of ['index.html', 'styles.css', 'dash.html', 'dash.css', 'icon.svg', 'manifest.webmanifest', 'app-files.json']) cpSync(join(root, f), join(dir, f));
 for (const f of readdirSync('js').filter((n) => n.endsWith('.js'))) cpSync(join(root, 'js', f), join(dir, 'js', f));
 for (const f of ['bridge.js', 'parsers.js', 'laps.js', 'race.js', 'engineer.js', 'package.json']) cpSync(join(root, 'bridge', f), join(dir, 'bridge', f));
 cpSync(join(root, 'bridge/windows/Start Morris Racing Bridge.cmd'), join(dir, 'Start Morris Racing Bridge.cmd'));

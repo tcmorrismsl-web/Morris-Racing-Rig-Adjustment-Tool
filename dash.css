@@ -160,6 +160,8 @@ button { font: inherit; color: inherit; }
 .eng-dialog h3 { margin: 18px 0 6px; font: 600 17px/1.2 var(--cond); }
 .fld { display: grid; gap: 4px; margin: 10px 0; font-size: 14px; color: var(--muted); }
 .fld select, .fld input[type="text"] { width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+.fld.check { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.fld.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; }
 .dlg-actions .btn { margin: 0; border: 0; cursor: pointer; }
 .map-list { margin: 6px 0; padding-left: 18px; font-size: 14px; }

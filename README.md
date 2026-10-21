@@ -22,6 +22,7 @@ On a phone, use "Add to Home Screen" so it opens like an app.
   - Track maps are drawn as cars drive the first lap and saved on the laptop, so they appear straight away next time.
   - *Adjustments* follow where you are: on track, only what you can change from the wheel (brake bias, on-throttle diff, ERS); in the garage, setup changes from your laps this session; at a race pit stop, front wing only. Tyre temperatures are left out.
   - *Race engineer*: a voice on the radio (the device's own female voice, flirty and smooth or straight to the point). F1: race splits and gap trends each lap, DRS/defend alerts, position changes, the game's pit window with a box-or-stay question, safety car, flags, penalties, fuel, tyre wear, rain warnings and weather changes, where you're losing time (compared with the car ahead in a race or the fastest lap in qualifying, shown on the map) with how to fix it, and in qualifying when to leave the garage for a gap in traffic and the latest time to leave for a final lap. Forza: lap times, position changes, where you lost time against your best lap, and fuel and tyre warnings.
+  - *Voice*: Fiery and flirty (default: upbeat, says numbers the way an engineer would, keeps a playful tab of your mistakes as a reminder of what a clean drive earns), Smooth and sultry, or Straight. A radio click plays before each call. The best-sounding voices are Edge's "Natural" voices on a laptop and Enhanced/Premium voices on iPhone.
   - *Talk back*: tap Gaps, Pit, Losing time, Weather, Tyres & fuel, Repeat, or Yes/No when she asks something. In F1 25, bind UDP Action 1–8 to wheel buttons (1 Yes, 2 No, 3 Gaps, 4 Pit, 5 Losing time, 6 Weather, 7 Tyres & fuel, 8 Repeat) and answer from the wheel. Spoken replies work where the browser allows the microphone (the laptop itself).
 - **Saved**: keep tunes and setups you like. They are stored in your browser on that device only.
 
@@ -39,6 +40,10 @@ The Xbox sends telemetry over your home network, which a phone browser can't rec
 Either port accepts either game. Laps are saved on the laptop in a `MorrisRacing` folder in your user folder, so nothing is lost if the phone screen locks.
 
 To try it without an Xbox: `npm run bridge`, then `npm run simulate -- forza` (or `f1`, `f1-2026`) for laps, or `npm run simulate:race -- f1` (or `f1-2026`, `forza`) for a full live race on the dashboard.
+
+## Updates
+
+The bridge keeps the app and dashboard up to date by itself: every 30 minutes it checks the app's website and downloads newer app files, as long as they work with that bridge. Reload the page on your phone to get them. When a change needs new bridge code, the Data tab says a new bridge is available.
 
 ## Accuracy
 

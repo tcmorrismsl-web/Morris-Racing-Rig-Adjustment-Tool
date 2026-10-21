@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=mvhhorbr">
+  <link rel="stylesheet" href="dash.css?v=mvhieha6">
 </head>
 <body data-game="f1">
   <header class="bar">
@@ -71,12 +71,14 @@
     <form method="dialog">
       <h2>Race engineer</h2>
       <label class="fld"><span>Style</span>
-        <select id="set-style"><option value="flirty">Flirty and smooth</option><option value="straight">Straight to the point</option></select></label>
+        <select id="set-style"></select></label>
       <label class="fld"><span>How much she talks</span>
         <select id="set-chat"><option value="key">Only what matters (box, flags, safety car)</option><option value="normal">Normal</option><option value="all">Everything</option></select></label>
       <label class="fld"><span>Voice</span><select id="set-voice"></select></label>
       <label class="fld"><span>She calls you</span><input type="text" id="set-name" maxlength="20" placeholder="Leave blank for handsome, love, darling…"></label>
-      <label class="fld"><span>Speed</span><input type="range" id="set-rate" min="0.8" max="1.15" step="0.05"></label>
+      <label class="fld"><span>Speed</span><input type="range" id="set-rate" min="0.8" max="1.2" step="0.05"></label>
+      <label class="fld check"><input type="checkbox" id="set-radio"> <span>Radio click before each call</span></label>
+      <p class="small">Smoothest voices: on a laptop, Microsoft Edge's "Natural" voices (Ava, Emma, Jenny). On iPhone, download an Enhanced or Premium English voice in Settings, Accessibility, Spoken Content, Voices, then pick it here if it's listed.</p>
       <div class="dlg-actions"><button type="button" class="mini" id="set-test">Test voice</button></div>
       <h3>Answer from your wheel (F1 25)</h3>
       <p class="small">In F1 25's controls settings, bind these <b>UDP Action</b> controls to spare buttons on your wheel. Presses come through the telemetry, so you never touch the phone.</p>
@@ -95,6 +97,6 @@
     <a class="btn" href="./">Back to the app</a>
   </div>
 
-  <script type="module" src="js/dash.js?v=mvhhorbr"></script>
+  <script type="module" src="js/dash.js?v=mvhieha6"></script>
 </body>
 </html>

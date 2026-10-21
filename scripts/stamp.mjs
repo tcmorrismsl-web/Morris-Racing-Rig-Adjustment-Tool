@@ -16,4 +16,9 @@ for (const f of files) {
     .replace(/const APP_VERSION = '[^']*';/, `const APP_VERSION = '${label}';`);
   if (after !== before) writeFileSync(f, after);
 }
-console.log(`Stamped version ${v}`);
+// List of app files for the bridge's self-update. bridgeMin is the bridge version these
+// files need; a bridge older than that keeps its own copy and asks for a new download.
+const bridgeMin = (readFileSync('bridge/bridge.js', 'utf8').match(/const VERSION = '([\d.]+)'/) || [])[1];
+const appFiles = ['index.html', 'dash.html', 'styles.css', 'dash.css', 'icon.svg', 'manifest.webmanifest', ...readdirSync('js').filter((f) => f.endsWith('.js')).map((f) => `js/${f}`)];
+writeFileSync('app-files.json', `${JSON.stringify({ version: v, label, bridgeMin, files: appFiles }, null, 2)}\n`);
+console.log(`Stamped version ${v} (${label}), needs bridge ${bridgeMin}`);

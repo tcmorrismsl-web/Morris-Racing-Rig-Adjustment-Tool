@@ -1,0 +1,23 @@
+{
+  "version": "mvhieha6",
+  "label": "Oct 20, 10:44 PM",
+  "bridgeMin": "1.3.0",
+  "files": [
+    "index.html",
+    "dash.html",
+    "styles.css",
+    "dash.css",
+    "icon.svg",
+    "manifest.webmanifest",
+    "js/advice.js",
+    "js/app.js",
+    "js/cars.js",
+    "js/dash.js",
+    "js/data.js",
+    "js/f1.js",
+    "js/forza.js",
+    "js/garage.js",
+    "js/live.js",
+    "js/voice.js"
+  ]
+}

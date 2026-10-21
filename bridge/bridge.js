@@ -13,13 +13,16 @@ const { parseForza, parseF1, parseF1Header } = require('./parsers');
 const { ForzaLaps, F1Laps } = require('./laps');
 const { F1Race, ForzaRace } = require('./race');
 
-const VERSION = '1.0.0';
+const VERSION = '1.3.0';
 const arg = (name, def) => {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 ? Number(process.argv[i + 1]) : Number(process.env[`MR_${name.toUpperCase()}`]) || def;
 };
 const PORTS = { http: arg('http', 8080), forza: arg('forza', 5300), f1: arg('f1', 20777) };
 const APP_ROOT = path.join(__dirname, '..');
+// The app and dashboard files update themselves from the app's website, so most changes
+// don't need a new bridge download. Bridge code itself never changes this way.
+const UPDATE_BASE = process.env.MR_UPDATE_URL || 'https://tcmorrismsl-web.github.io/Morris-Racing-Rig-Adjustment-Tool/';
 const DATA_DIR = process.env.MR_DATA || path.join(os.homedir(), 'MorrisRacing');
 const FILES = { laps: path.join(DATA_DIR, 'laps.json'), state: path.join(DATA_DIR, 'app-state.json'), context: path.join(DATA_DIR, 'context.json') };
 const TRACK_DIR = path.join(DATA_DIR, 'tracks');
@@ -125,6 +128,7 @@ function status() {
   const flow = (s) => ({ packets: s.packets, receiving: !!s.last && now - s.last < 3000, last: s.last });
   return {
     bridge: true, version: VERSION, ports: PORTS, addresses: lanAddresses(),
+    app: { version: appInfo.active?.label || null, bridgeUpdate: appInfo.bridgeUpdate },
     forza: { ...flow(stats.forza), live: forza.live }, f1: { ...flow(stats.f1), live: f1.live, inUse: f1Race.inUse() },
     laps: laps.length, context,
   };
@@ -193,8 +197,9 @@ const server = http.createServer(async (req, res) => {
     }
     // Static app files
     const rel = decodeURIComponent(p === '/' ? '/index.html' : p).replace(/^\/+/, '');
-    const file = path.join(APP_ROOT, rel);
-    if (!file.startsWith(APP_ROOT) || rel.startsWith('bridge') || rel.startsWith('.')) { res.writeHead(404); return res.end('Not found'); }
+    const root = appRoot();
+    const file = path.join(root, rel);
+    if (!file.startsWith(root) || rel.startsWith('bridge') || rel.startsWith('.')) { res.writeHead(404); return res.end('Not found'); }
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
@@ -210,7 +215,62 @@ setInterval(() => { if (clients.size) send('status', status()); }, 1000);
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// App self-update
+// ---------------------------------------------------------------------------
+const UPDATE_DIR = path.join(DATA_DIR, 'app-update');
+const stampNum = (m) => (m && m.version ? parseInt(m.version, 36) || 0 : 0);
+const semver = (v) => String(v || '0').split('.').map((n) => Number(n) || 0);
+const atLeast = (have, need) => { const a = semver(have), b = semver(need); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); } return true; };
+const SAFE_FILE = /^(?:js\/)?[\w.-]+\.(?:html|js|css|svg|webmanifest)$/;
+const appInfo = { local: readJson(path.join(APP_ROOT, 'app-files.json'), null), cached: null, active: null, bridgeUpdate: false };
+appInfo.cached = readJson(path.join(UPDATE_DIR, 'current', 'app-files.json'), null);
+function pickAppRoot() {
+  const c = appInfo.cached;
+  const useCache = c && atLeast(VERSION, c.bridgeMin) && stampNum(c) > stampNum(appInfo.local);
+  appInfo.active = useCache ? c : appInfo.local;
+  return useCache ? path.join(UPDATE_DIR, 'current') : APP_ROOT;
+}
+let activeRoot = pickAppRoot();
+function appRoot() { return activeRoot; }
+
+async function checkForAppUpdate() {
+  try {
+    const res = await fetch(`${UPDATE_BASE}app-files.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!res.ok) return;
+    const m = await res.json();
+    if (!m || !Array.isArray(m.files) || stampNum(m) <= stampNum(appInfo.active)) return;
+    if (!atLeast(VERSION, m.bridgeMin)) {
+      if (!appInfo.bridgeUpdate) log(`A newer bridge (${m.bridgeMin}) is available. Download it from the app's Data tab when you have a moment.`);
+      appInfo.bridgeUpdate = true;
+      return;
+    }
+    if (!m.files.every((f) => SAFE_FILE.test(f))) return;
+    const tmp = path.join(UPDATE_DIR, `tmp-${m.version}`);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    for (const f of m.files) {
+      const r = await fetch(`${UPDATE_BASE}${f}?v=${m.version}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`${f}: ${r.status}`);
+      const data = Buffer.from(await r.arrayBuffer());
+      if (!data.length) throw new Error(`${f}: empty`);
+      fs.mkdirSync(path.dirname(path.join(tmp, f)), { recursive: true });
+      fs.writeFileSync(path.join(tmp, f), data);
+    }
+    fs.writeFileSync(path.join(tmp, 'app-files.json'), JSON.stringify(m));
+    const cur = path.join(UPDATE_DIR, 'current');
+    fs.rmSync(cur, { recursive: true, force: true });
+    fs.renameSync(tmp, cur);
+    appInfo.cached = m;
+    activeRoot = pickAppRoot();
+    log(`Updated the app to the latest version (${m.label}). Reload the page on your phone to get it.`);
+  } catch (e) {
+    log(`Couldn't check for app updates right now (${e.message}). Using the copy you have.`);
+  }
+}
+
 function start() {
+  setTimeout(checkForAppUpdate, 3000);
+  setInterval(checkForAppUpdate, 30 * 60 * 1000);
   server.on('error', (e) => { log(`Could not start the app server on port ${PORTS.http}: ${e.message}`); });
   server.listen(PORTS.http, '0.0.0.0', () => {
     const ip = lanAddresses()[0] || 'YOUR-LAPTOP-IP';
