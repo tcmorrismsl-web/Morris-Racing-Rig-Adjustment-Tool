@@ -7,6 +7,7 @@
 
 const BUCKET_M = 10;           // track outline resolution, metres of lap distance
 const WINDOW_S = 60;           // rolling window for on-track advice, seconds of driving
+const { F1Engineer, ForzaEngineer, SEGMENTS } = require('./engineer');
 const round = (v, d = 0) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : null);
 
 // ---------------------------------------------------------------------------
@@ -93,6 +94,8 @@ class F1Race {
     this.trackKey = null;
     this.roll = new Rolling();
     this.lastSeen = 0;
+    this.curInvalid = false; this.lastLapInvalid = false; this.myLapNum = null;
+    this.eng = new F1Engineer(this);
   }
 
   push(m) {
@@ -101,10 +104,12 @@ class F1Race {
     if (h.sessionUID !== this.uid) this.reset(h.sessionUID);
     this.format = h.format;
     this.player = h.playerIndex;
+    this.t = h.sessionTime;
     this.lastSeen = Date.now();
     switch (m.type) {
       case 'session': {
         this.session = { ...this.session, ...m };
+        this.eng.onSession(m);
         if (m.trackLength && m.trackId >= 0) {
           const key = `f1-${m.trackId}`;
           if (key !== this.trackKey) {
@@ -116,7 +121,17 @@ class F1Race {
         break;
       }
       case 'motion': this.motion = m.cars; this.trace(); break;
-      case 'lap': this.lap = m.cars; break;
+      case 'lap': {
+        this.lap = m.cars;
+        const mine = m.cars[this.player];
+        if (mine) {
+          if (this.myLapNum !== null && mine.lapNum !== this.myLapNum) { this.lastLapInvalid = this.curInvalid; this.curInvalid = false; }
+          this.myLapNum = mine.lapNum;
+          if (mine.invalid) this.curInvalid = true;
+        }
+        this.eng.onLap();
+        break;
+      }
       case 'participants': this.parts = m.cars; this.numActive = m.numActive; break;
       case 'status': this.status = m.cars; break;
       case 'setup': this.setup = m; break;
@@ -125,7 +140,7 @@ class F1Race {
       case 'damage': this.wear = m.tyreWear; break;
       case 'telemetry': this.tel = m; break;
       case 'motionEx': this.sample(m, h.sessionTime); break;
-      case 'event': this.event(m, h.sessionTime); break;
+      case 'event': this.event(m, h.sessionTime); this.eng.onEvent(m); break;
       default:
     }
   }
@@ -148,17 +163,19 @@ class F1Race {
     if (!tel || tel.speedKmh < 40) return;
     const r = this.roll;
     r.add(t, 'n');
+    let lockF = false, spin = false;
     if (tel.brake > 0.4) {
       r.add(t, 'brk');
-      if (Math.min(m.slipRatio[0], m.slipRatio[1]) < -0.15) r.add(t, 'lockF');
+      lockF = Math.min(m.slipRatio[0], m.slipRatio[1]) < -0.15;
+      if (lockF) r.add(t, 'lockF');
       if (Math.min(m.slipRatio[2], m.slipRatio[3]) < -0.15) r.add(t, 'lockR');
     }
     if (tel.throttle > 0.8 && tel.brake < 0.1) {
       r.add(t, 'thr');
-      if (Math.max(m.slipRatio[2], m.slipRatio[3]) > 0.15) r.add(t, 'spin');
+      spin = Math.max(m.slipRatio[2], m.slipRatio[3]) > 0.15;
+      if (spin) r.add(t, 'spin');
     }
-    r.add(t, 'tF', (tel.surfaceTemp[0] + tel.surfaceTemp[1]) / 2);
-    r.add(t, 'tR', (tel.surfaceTemp[2] + tel.surfaceTemp[3]) / 2);
+    this.eng.onSample(lockF, spin, tel.speedKmh);
   }
 
   event(m, t) {
@@ -264,6 +281,9 @@ class F1Race {
       pit: this.pitAdvice(race),
       adjust: this.adjustments(race),
       events: this.events,
+      engineer: this.eng.state(),
+      sessionId: this.uid ? `f1-${this.uid}` : null,
+      inUse: this.inUse(),
     };
   }
 
@@ -335,30 +355,36 @@ class F1Race {
     const r = this.roll;
     const out = [];
     const n = r.sum('n');
-    if (n < 300) return { ready: false, items: out }; // about 5 s of driving at 60 Hz
+    if (n < 300) return { ready: false, items: out, mode: this.mode() }; // about 5 s of driving at 60 Hz
     const brk = r.sum('brk'), thr = r.sum('thr');
     const lockF = brk >= 60 ? r.sum('lockF') / brk : 0;
     const lockR = brk >= 60 ? r.sum('lockR') / brk : 0;
     const spin = thr >= 120 ? r.sum('spin') / thr : 0;
-    const tF = r.sum('tF') / n, tR = r.sum('tR') / n;
     const bias = this.setup?.brakeBias || st.brakeBias;
 
     if (lockF > 0.12 && lockF > lockR * 1.5) out.push({ level: 'now', title: `Brake bias back 1%${bias ? ` (to ${bias - 1}%)` : ''}`, text: `Front wheels locked in ${Math.round(lockF * 100)}% of braking in the last minute.` });
     else if (lockR > 0.12 && lockR > lockF * 1.5) out.push({ level: 'now', title: `Brake bias forward 1%${bias ? ` (to ${bias + 1}%)` : ''}`, text: `Rear wheels locked in ${Math.round(lockR * 100)}% of braking in the last minute.` });
     if (spin > 0.15) {
       const d = this.setup?.diffOn;
-      out.push({ level: 'now', title: `Lower on-throttle diff${d ? ` (now ${d}%)` : ''}`, text: `Rear wheelspin in ${Math.round(spin * 100)}% of full-throttle time. A more open diff and short-shifting out of slow corners will help.` });
+      out.push({ level: 'now', title: `On-throttle diff down 5%${d ? ` (to ${Math.max(10, d - 5)}%)` : ''}`, text: `Rear wheelspin in ${Math.round(spin * 100)}% of full-throttle time. Change it on the MFD, and short-shift out of slow corners.` });
     }
-    if (tR > 105) out.push({ level: 'soon', title: `Rears hot (${Math.round(tR)}°C)`, text: 'Smoother on the throttle out of slow corners and short-shift to bring them back to 90–100°C.' });
-    if (tF > 105) out.push({ level: 'soon', title: `Fronts hot (${Math.round(tF)}°C)`, text: 'Brake a touch earlier and use less steering lock mid-corner.' });
-    if (tF > 0 && tF < 80 && tR < 80) out.push({ level: 'info', title: `Tyres cold (${Math.round((tF + tR) / 2)}°C)`, text: 'Push a little harder or weave under the safety car to bring them up.' });
     // ERS as a percentage of the 4 MJ store (2025 cars only; the 2026 battery rules differ).
     if (Number.isFinite(st.ersStore) && this.format < 2026) {
       const pct = (st.ersStore / 4e6) * 100;
       if (pct < 15 && st.ersMode >= 2) out.push({ level: 'soon', title: `ERS low (${Math.round(pct)}%)`, text: 'Switch the ERS mode to Medium or None for a lap to recharge.' });
       else if (pct > 85 && st.ersMode <= 1 && race) out.push({ level: 'info', title: `ERS full (${Math.round(pct)}%)`, text: 'You have charge to spare. Use Overtake mode to attack or defend.' });
     }
-    return { ready: true, items: out, bias: bias || null, diffOn: this.setup?.diffOn ?? null, ers: Number.isFinite(st.ersStore) && this.format < 2026 ? round((st.ersStore / 4e6) * 100) : null };
+    return { ready: true, mode: this.mode(), items: out, bias: bias || null, diffOn: this.setup?.diffOn ?? null, ers: Number.isFinite(st.ersStore) && this.format < 2026 ? round((st.ersStore / 4e6) * 100) : null };
+  }
+
+  // Where the car is: out on track (wheel and MFD changes), in the pit lane during a race
+  // (tyres and front wing at the stop), or in the garage (full setup changes).
+  mode() {
+    const c = this.lap[this.player];
+    if (!c) return 'track';
+    if (c.driverStatus === 0) return 'garage';
+    if (c.pitStatus > 0) return 'pitlane';
+    return 'track';
   }
 
   // What's in use right now, straight from the game: session, tyre and the setup on the car.
@@ -423,6 +449,7 @@ class ForzaRace {
     this.roll = new Rolling();
     this.lastSeen = 0;
     this.carOrdinal = null;
+    this.eng = new ForzaEngineer(this);
   }
 
   push(p) {
@@ -447,6 +474,7 @@ class ForzaRace {
       this.lapDone(p, prev);
     }
     this.p = p;
+    this.eng.onPacket(p);
     if (!p.isRaceOn) return;
     const d = p.distance - (this.lapStartDist ?? p.distance);
     if (d >= 0) {
@@ -473,6 +501,18 @@ class ForzaRace {
     }
     if (this.lapStartFuel !== null && p.fuel <= this.lapStartFuel) this.fuelPerLap.push(this.lapStartFuel - p.fuel);
     if (this.lapStartWear && p.tyreWear) this.wearPerLap.push(Math.max(...p.tyreWear.map((w, i) => w - this.lapStartWear[i])));
+    // Mini-sector times for the engineer: this lap against your best.
+    const segsOf = (trace, lapS) => {
+      if (!trace || !(lapLen > 500)) return null;
+      const at = (k) => trace[Math.floor((k * lapLen) / SEGMENTS / BUCKET_M)];
+      const t = Array.from({ length: SEGMENTS }, (_, k) => (k === 0 ? 0 : at(k)));
+      if (t.some((v) => v === undefined)) return null;
+      return t.map((v, k) => (k < SEGMENTS - 1 ? t[k + 1] - v : lapS - v));
+    };
+    const prevBest = this.bestLap;
+    const segs = p.lastLap > 0 ? segsOf(this.trace, p.lastLap) : null;
+    const bestSegs = this.bestTrace && prevBest ? segsOf(this.bestTrace, prevBest) : null;
+    if (p.lastLap > 0) this.eng.onLapDone(p.lastLap, prevBest, segs, bestSegs, p.lapNumber, Number(this.getLaps()) || null);
     if (p.lastLap > 0 && (this.bestLap === null || p.lastLap <= this.bestLap + 0.001)) {
       this.bestLap = p.lastLap;
       this.bestTrace = this.trace.slice();
@@ -495,8 +535,6 @@ class ForzaRace {
       if (Math.min(p.slipRatio[0], p.slipRatio[1]) < -0.2) r.add(t, 'lockF');
       if (Math.min(p.slipRatio[2], p.slipRatio[3]) < -0.2) r.add(t, 'lockR');
     }
-    r.add(t, 'tF', (p.tyreTemp[0] + p.tyreTemp[1]) / 2);
-    r.add(t, 'tR', (p.tyreTemp[2] + p.tyreTemp[3]) / 2);
   }
 
   liveDelta() {
@@ -540,15 +578,15 @@ class ForzaRace {
       const lockF = brk >= 60 ? r.sum('lockF') / brk : 0;
       const lockR = brk >= 60 ? r.sum('lockR') / brk : 0;
       const spin = thr >= 120 ? r.sum('spin') / thr : 0;
-      const tF = r.sum('tF') / n, tR = r.sum('tR') / n;
       if (lockF > 0.12) tips.push({ level: 'now', title: 'Front lock-ups', text: `In ${Math.round(lockF * 100)}% of braking. Brake a little earlier and ease off the pedal as you turn in.` });
       if (lockR > 0.12) tips.push({ level: 'now', title: 'Rear lock-ups', text: `In ${Math.round(lockR * 100)}% of braking. Brake in a straight line and downshift more gently.` });
       if (spin > 0.15) tips.push({ level: 'now', title: 'Wheelspin on exits', text: `In ${Math.round(spin * 100)}% of full-throttle time. Squeeze the throttle on gradually until the car is straight.` });
-      if (Math.abs(tF - tR) >= 20) tips.push({ level: 'info', title: tF > tR ? 'Front tyres hotter than rears' : 'Rear tyres hotter than fronts', text: `${Math.round(tF)}°F front, ${Math.round(tR)}°F rear. ${tF > tR ? 'Less steering lock and smoother turn-in will spare the fronts.' : 'Smoother throttle will spare the rears.'} After the race, Fix it has setup changes.` });
     }
 
+    this.eng.onEstimates(pit);
     return {
       game: 'forza',
+      engineer: this.eng.state(),
       live: Date.now() - this.lastSeen < 3000 && p.isRaceOn,
       session: { lap, totalLaps, position: p.position || null, speedKmh: Math.round(p.speed * 3.6), gear: p.gear, fuelPct: round(p.fuel * 100) },
       timing: { currentS: round(p.currentLap, 3), lastS: p.lastLap > 0 ? round(p.lastLap, 3) : null, bestS: p.bestLap > 0 ? round(p.bestLap, 3) : null, deltaS: this.liveDelta(), raceTimeS: round(p.raceTime, 1) },
@@ -560,7 +598,7 @@ class ForzaRace {
         cars: [{ x: round(p.posX, 1), z: round(p.posZ, 1), me: true, pos: p.position || null }],
       },
       pit,
-      adjust: { ready: n >= 300, items: tips, forza: true },
+      adjust: { ready: n >= 300, items: tips, forza: true, mode: p.isRaceOn ? 'track' : 'garage' },
     };
   }
 

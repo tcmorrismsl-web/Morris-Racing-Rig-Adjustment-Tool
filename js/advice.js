@@ -132,9 +132,9 @@ export function lapAdvice(laps, opts = {}) {
     }
   }
 
-  // Tyre temperatures
-  const temp = across(laps, (l) => l.tyres?.temp);
-  const inner = across(laps, (l) => l.tyres?.inner);
+  // Tyre temperatures (left out when opts.noTemps is set)
+  const temp = opts.noTemps ? null : across(laps, (l) => l.tyres?.temp);
+  const inner = opts.noTemps ? null : across(laps, (l) => l.tyres?.inner);
   if (game === 'f1' && inner) {
     const fr = mean([inner[0], inner[1]]), rr = mean([inner[2], inner[3]]);
     for (const [axle, v, idx] of [['front', fr, 'Front'], ['rear', rr, 'Rear']]) {

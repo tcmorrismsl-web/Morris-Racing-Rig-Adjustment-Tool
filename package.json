@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Wheel settings and setup recommendations for Forza Motorsport and F1 25 on a MOZA R3.",
   "scripts": {
-    "test": "node tests/run.mjs && node tests/telemetry.mjs && node tests/dash.mjs",
+    "test": "node tests/run.mjs && node tests/telemetry.mjs && node tests/dash.mjs && node tests/engineer.mjs",
     "bridge": "node bridge/bridge.js",
     "simulate": "node tests/sim.cjs",
     "build:bridge": "node scripts/stamp.mjs && node scripts/pack-bridge.mjs",

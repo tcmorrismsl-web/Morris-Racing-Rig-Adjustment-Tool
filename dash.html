@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=mvg6oqeh">
+  <link rel="stylesheet" href="dash.css?v=mvhhorbr">
 </head>
 <body data-game="f1">
   <header class="bar">
@@ -25,6 +25,7 @@
       <svg id="map" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Track map with car positions">
         <path id="outline" class="outline" d=""/>
         <path id="outline-in" class="outline-in" d=""/>
+        <g id="loss"></g>
         <g id="dots"></g>
       </svg>
       <p class="map-note" id="map-note"></p>
@@ -45,7 +46,47 @@
       <div id="adj"></div>
       <ul class="events" id="events"></ul>
     </section>
+
+    <section class="panel eng-panel" aria-label="Race engineer">
+      <div class="eng-row">
+        <button type="button" class="eng-power" id="eng-power" aria-pressed="false" title="Turn the engineer's voice on or off"><span class="dot"></span><span id="eng-power-label">Engineer off</span></button>
+        <p class="eng-said" id="eng-said" aria-live="polite">The engineer talks you through the session. Tap to turn her voice on.</p>
+        <button type="button" class="mini" id="eng-settings" title="Engineer settings">Settings</button>
+      </div>
+      <div class="eng-asks" id="eng-asks">
+        <button type="button" class="ask yes" data-ask="yes">Yes</button>
+        <button type="button" class="ask no" data-ask="no">No</button>
+        <button type="button" class="ask" data-ask="gaps">Gaps</button>
+        <button type="button" class="ask" data-ask="pit">Pit</button>
+        <button type="button" class="ask" data-ask="time">Losing time</button>
+        <button type="button" class="ask" data-ask="weather">Weather</button>
+        <button type="button" class="ask" data-ask="tyres">Tyres &amp; fuel</button>
+        <button type="button" class="ask" data-ask="repeat">Repeat</button>
+        <button type="button" class="ask mic" id="eng-mic" hidden>Talk</button>
+      </div>
+    </section>
   </main>
+
+  <dialog id="eng-dialog" class="eng-dialog">
+    <form method="dialog">
+      <h2>Race engineer</h2>
+      <label class="fld"><span>Style</span>
+        <select id="set-style"><option value="flirty">Flirty and smooth</option><option value="straight">Straight to the point</option></select></label>
+      <label class="fld"><span>How much she talks</span>
+        <select id="set-chat"><option value="key">Only what matters (box, flags, safety car)</option><option value="normal">Normal</option><option value="all">Everything</option></select></label>
+      <label class="fld"><span>Voice</span><select id="set-voice"></select></label>
+      <label class="fld"><span>She calls you</span><input type="text" id="set-name" maxlength="20" placeholder="Leave blank for handsome, love, darling…"></label>
+      <label class="fld"><span>Speed</span><input type="range" id="set-rate" min="0.8" max="1.15" step="0.05"></label>
+      <div class="dlg-actions"><button type="button" class="mini" id="set-test">Test voice</button></div>
+      <h3>Answer from your wheel (F1 25)</h3>
+      <p class="small">In F1 25's controls settings, bind these <b>UDP Action</b> controls to spare buttons on your wheel. Presses come through the telemetry, so you never touch the phone.</p>
+      <ul class="map-list" id="udp-list"></ul>
+      <p class="small" id="mic-note"></p>
+      <h3>Radio log</h3>
+      <ol class="radio-log" id="radio-log"></ol>
+      <div class="dlg-actions"><button class="btn">Done</button></div>
+    </form>
+  </dialog>
 
   <div class="offline" id="offline" hidden>
     <h1>Race dashboard</h1>
@@ -54,6 +95,6 @@
     <a class="btn" href="./">Back to the app</a>
   </div>
 
-  <script type="module" src="js/dash.js?v=mvg6oqeh"></script>
+  <script type="module" src="js/dash.js?v=mvhhorbr"></script>
 </body>
 </html>

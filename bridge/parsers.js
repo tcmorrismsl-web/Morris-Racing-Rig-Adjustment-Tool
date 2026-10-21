@@ -189,6 +189,7 @@ function parseF1(b) {
       else if (out.code === 'SCAR') { out.safetyCarType = b.readUInt8(d); out.eventType = b.readUInt8(d + 1); }
       else if (out.code === 'RCWN') { out.car = b.readUInt8(d); }
       else if (out.code === 'DTSV' || out.code === 'SGSV') { out.car = b.readUInt8(d); }
+      else if (out.code === 'BUTN' && b.length >= 37) { out.buttons = b.readUInt32LE(d); }
       return out;
     }
     case 4: { // Participants: 57 bytes per car (60 in 2026, where three ids became 16-bit)

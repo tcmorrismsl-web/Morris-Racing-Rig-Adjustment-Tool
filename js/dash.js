@@ -1,5 +1,8 @@
 // Live race dashboard. Reads the bridge's 10-per-second race stream and draws the
-// track map, timing tower, pit options and on-track adjustments.
+// track map, timing tower, pit options, adjustments and the race engineer.
+
+import * as voice from './voice.js?v=mvhhorbr';
+import { lapAdvice } from './advice.js?v=mvhhorbr';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -82,6 +85,7 @@ async function refreshTrack(m) {
     const t = await (await fetch(`api/track?game=${game}`, { cache: 'no-store' })).json();
     map.key = m.key; map.version = m.version; map.fetchedAt = Date.now();
     map.points = Array.isArray(t.points) ? t.points : [];
+    map.length = t.length || 0;
     map.closed = !!t.complete;
     flip = store.get(flipKey(), false);
     drawOutline();
@@ -104,6 +108,24 @@ function drawCars(m) {
     if (c.me) html += `<circle class="me-ring" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r * 2).toFixed(1)}"/>`;
     if (c.pos) html += `<text class="dot-label" x="${x.toFixed(1)}" y="${y.toFixed(1)}" font-size="${(r * 1.3).toFixed(1)}" style="stroke-width:${(r * 0.25).toFixed(1)}px">${c.pos}</text>`;
   }
+  g.innerHTML = html;
+}
+
+// Where you lost time on your last lap: each mini-sector coloured by how much.
+function drawLoss(e) {
+  const g = $('loss');
+  const loss = e?.segLoss;
+  if (!loss || !map.box || map.points.length < 20) { g.innerHTML = ''; return; }
+  const n = loss.length, pts = map.points;
+  let html = '';
+  loss.forEach((ms, k) => {
+    if (ms < 60) return;
+    const a = Math.floor((k / n) * pts.length), b = Math.min(pts.length - 1, Math.ceil(((k + 1) / n) * pts.length));
+    const seg = pts.slice(a, b + 1).map(([x, z]) => project(x, z).map((v) => v.toFixed(1)).join(' '));
+    if (seg.length < 2) return;
+    const strong = Math.min(1, ms / 400);
+    html += `<path class="loss-seg" d="M${seg.join('L')}" stroke="rgba(255,${Math.round(176 - 110 * strong)},32,${(0.55 + 0.45 * strong).toFixed(2)})" stroke-width="${(5 + 5 * strong).toFixed(1)}"/>`;
+  });
   g.innerHTML = html;
 }
 
@@ -188,20 +210,50 @@ function renderPit(d) {
   $('pit').innerHTML = html;
 }
 
+// Garage and pit-lane advice comes from this session's logged laps.
+const sessionLaps = { at: 0, laps: [], key: null };
+async function loadSessionLaps(d) {
+  if (Date.now() - sessionLaps.at < 15000) return;
+  sessionLaps.at = Date.now();
+  try {
+    const all = await (await fetch('api/laps', { cache: 'no-store' })).json();
+    const mine = all.filter((l) => l.game === d.game);
+    const key = d.game === 'f1' ? d.sessionId : mine.at(-1)?.session;
+    sessionLaps.key = key;
+    sessionLaps.laps = mine.filter((l) => l.session === key && l.valid !== false);
+  } catch { /* keep what we have */ }
+}
+
 function renderAdjust(d) {
   const a = d.adjust || {};
-  if (d.game === 'forza') {
-    $('adj-title').textContent = 'Driving tips';
-    $('adj-sub').textContent = 'Last minute of driving';
-  } else {
-    $('adj-title').textContent = 'Adjust on track';
-    $('adj-sub').textContent = [a.bias ? `Bias ${a.bias}%` : '', a.diffOn ? `Diff ${a.diffOn}%` : '', a.ers !== null && a.ers !== undefined ? `ERS ${a.ers}%` : ''].filter(Boolean).join(' · ');
-  }
+  const mode = a.mode || 'track';
+  const chip = (t) => `<span class="mode-chip">${t}</span>`;
   let html;
-  if (!a.ready) html = '<p class="empty">Gathering data. Advice appears after a few corners.</p>';
-  else if (!a.items.length) html = `<p class="empty">Nothing to change. ${d.game === 'forza' ? 'Clean driving.' : 'Car looks happy.'}</p>`;
-  else html = `<div class="cards">${a.items.map(card).join('')}</div>`;
-  if (d.game === 'forza') html += '<p class="small" style="margin-top:8px">Forza has no in-car setup changes. After the race, Fix it has tune changes.</p>';
+  if (mode === 'garage' || mode === 'pitlane') {
+    loadSessionLaps(d);
+    const adv = lapAdvice(sessionLaps.laps.slice(-5), { noTemps: true });
+    const pitStop = mode === 'pitlane';
+    $('adj-title').textContent = pitStop ? 'At this stop' : d.game === 'forza' ? 'Tune changes' : 'Setup changes';
+    $('adj-sub').innerHTML = chip(pitStop ? 'Pit lane' : d.game === 'forza' ? 'Not racing' : 'In the garage');
+    let items = adv.findings;
+    // At a race pit stop only the front wing can change, so keep wing changes.
+    if (pitStop) items = items.map((f) => ({ ...f, changes: f.changes.filter((c) => /front wing/i.test(c)) })).filter((f) => f.changes.length);
+    if (sessionLaps.laps.length < 2) html = `<p class="empty">${pitStop ? 'Tyres are on the Pit panel.' : 'Drive at least 2 clean laps this session and setup changes appear here.'}</p>`;
+    else if (!items.length) html = `<p class="empty">${pitStop ? 'No wing change needed. Fresh tyres and go.' : 'Nothing to change from your laps. The car looks balanced.'}</p>`;
+    else html = `<div class="cards">${items.slice(0, 4).map((f) => card({ level: f.severity === 'high' ? 'now' : f.severity === 'medium' ? 'soon' : 'info', title: f.title, text: `${f.changes.join(' ')} ${f.evidence}` })).join('')}</div><p class="small" style="margin-top:6px">From your last ${Math.min(5, sessionLaps.laps.length)} clean laps. Make one change, then run again.</p>`;
+  } else {
+    if (d.game === 'forza') {
+      $('adj-title').textContent = 'Driving tips';
+      $('adj-sub').innerHTML = chip('On track');
+    } else {
+      $('adj-title').textContent = 'From the wheel';
+      $('adj-sub').innerHTML = `${chip('On track')} ${[a.bias ? `Bias ${a.bias}%` : '', a.diffOn ? `Diff ${a.diffOn}%` : '', a.ers !== null && a.ers !== undefined ? `ERS ${a.ers}%` : ''].filter(Boolean).join(' · ')}`;
+    }
+    if (!a.ready) html = '<p class="empty">Gathering data. Advice appears after a few corners.</p>';
+    else if (!a.items.length) html = `<p class="empty">Nothing to change. ${d.game === 'forza' ? 'Clean driving.' : 'Car looks happy.'}</p>`;
+    else html = `<div class="cards">${a.items.map(card).join('')}</div>`;
+    if (d.game === 'forza') html += '<p class="small" style="margin-top:8px">Forza has no in-car changes. Tune changes show here when you are back in the menus.</p>';
+  }
   $('adj').innerHTML = html;
   $('events').innerHTML = (d.events || []).map((e) => `<li>${esc(e.text)}</li>`).join('');
 }
@@ -220,6 +272,89 @@ function renderBar(d) {
   sc.hidden = !s.safetyCar;
   sc.textContent = s.safetyCar || '';
 }
+
+// ---------------------------------------------------------------------------
+// Race engineer
+// ---------------------------------------------------------------------------
+let firstEngineer = true;
+let pending = null;
+function renderEngineer(d) {
+  const e = d.engineer;
+  if (!e) return;
+  if (firstEngineer) { voice.catchUp(e.calls.slice(0, -1)); firstEngineer = false; }
+  voice.receive(e.calls);
+  pending = e.pending;
+  document.querySelector('.eng-panel').classList.toggle('pending', !!pending);
+  if (e.buttons) $('udp-list').innerHTML = Object.entries(e.buttons).map(([n, t]) => `<li><b>UDP Action ${n}</b>: ${{ yes: 'Yes', no: 'No', gaps: 'Gaps', pit: 'Pit plan', time: 'Where am I losing time', weather: 'Weather', tyres: 'Tyres and fuel', repeat: 'Repeat' }[t]}</li>`).join('');
+  else $('udp-list').innerHTML = '<li>Forza doesn\'t send button presses, so use the buttons on this screen.</li>';
+  drawLoss(e);
+}
+
+voice.onTranscript(() => {
+  const t = voice.transcript[0];
+  const said = $('eng-said');
+  if (t) { said.textContent = t.text; said.classList.toggle('ask-now', !!t.ask); }
+  $('radio-log').innerHTML = voice.transcript.map((x) => `<li>${esc(x.text)}</li>`).join('');
+});
+
+function setPower(on) {
+  voice.settings.on = on;
+  voice.saveSettings();
+  $('eng-power').setAttribute('aria-pressed', String(on));
+  $('eng-power-label').textContent = on ? 'Engineer on' : 'Engineer off';
+  if (!on) voice.stop();
+}
+setPower(voice.settings.on);
+$('eng-power').addEventListener('click', () => {
+  const on = !voice.settings.on;
+  setPower(on);
+  // Phones only allow speech that starts from a tap, so say hello now.
+  if (on) voice.speak(voice.settings.style === 'flirty' ? `Hey ${voice.settings.name || 'handsome'}. I'm here. Ask me anything.` : 'Engineer on. Radio check.');
+});
+
+async function ask(topic) {
+  try {
+    await fetch('api/engineer', { method: 'POST', body: JSON.stringify({ game, ask: topic }) });
+  } catch { /* the bridge will be back */ }
+}
+$('eng-asks').addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-ask]');
+  if (b) ask(b.dataset.ask);
+});
+
+// Voice replies, where the browser allows the microphone.
+const mic = $('eng-mic');
+mic.hidden = !voice.canListen;
+$('mic-note').textContent = voice.canListen
+  ? 'You can also tap Talk and say things like "gaps", "box", "where am I losing time", "weather", "yes" or "no".'
+  : 'Talking back needs the dashboard open on the laptop itself (the browser only allows the microphone there). On a phone, use the wheel buttons or tap.';
+mic.addEventListener('click', () => {
+  voice.listen((cmd, said) => {
+    if (cmd) ask(cmd);
+    else voice.speak(voice.settings.style === 'flirty' ? `Sorry, I didn't catch that. Say it again for me?` : `Didn't catch that.`);
+    $('eng-said').textContent = `You: "${said}"`;
+  }, (st) => mic.classList.toggle('listening', st === 'listening'));
+});
+
+// Settings
+function fillVoices() {
+  const list = voice.voices();
+  const cur = voice.pickVoice();
+  $('set-voice').innerHTML = list.length ? list.map((v) => `<option value="${esc(v.name)}"${cur && v.name === cur.name ? ' selected' : ''}>${esc(v.name)}</option>`).join('') : '<option>Device default</option>';
+}
+if ('speechSynthesis' in window) speechSynthesis.addEventListener?.('voiceschanged', fillVoices);
+$('eng-settings').addEventListener('click', () => {
+  fillVoices();
+  $('set-style').value = voice.settings.style;
+  $('set-chat').value = voice.settings.chat;
+  $('set-name').value = voice.settings.name;
+  $('set-rate').value = voice.settings.rate;
+  $('eng-dialog').showModal();
+});
+for (const [id, key, num] of [['set-style', 'style'], ['set-chat', 'chat'], ['set-voice', 'voice'], ['set-name', 'name'], ['set-rate', 'rate', true]]) {
+  $(id).addEventListener('change', (e) => { voice.settings[key] = num ? Number(e.target.value) : e.target.value.trim(); voice.saveSettings(); });
+}
+$('set-test').addEventListener('click', () => voice.speak(voice.phrase({ kind: 'splits', priority: 'normal', text: 'P4, 6 to go. NORRIS 1.2 ahead, you took 0.3 off him. RUSSELL 0.9 behind.', data: {} })));
 
 // ---------------------------------------------------------------------------
 // Stream
@@ -248,6 +383,7 @@ function onDash(d) {
   const now = performance.now();
   if (now - towerAt > 250) { towerAt = now; renderTower(d); }
   if (now - panelsAt > 500) { panelsAt = now; renderPit(d); renderAdjust(d); }
+  renderEngineer(d);
 }
 
 // Keep the screen on while the dashboard is open.

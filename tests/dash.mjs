@@ -75,8 +75,9 @@ for (const format of [2025, 2026]) {
   // Adjustments
   const titles = s.adjust.items.map((x) => x.title).join(' | ');
   assert.ok(/Brake bias back 1% \(to 55%\)/.test(titles), `${format}: bias advice: ${titles}`);
-  assert.ok(/Lower on-throttle diff \(now 65%\)/.test(titles), 'diff advice');
-  assert.ok(/Rears hot \(109°C\)/.test(titles), 'tyre temp advice');
+  assert.ok(/On-throttle diff down 5% \(to 60%\)/.test(titles), 'diff advice');
+  assert.ok(!/hot|cold/i.test(titles), 'no tyre temperature advice');
+  assert.equal(s.adjust.mode, 'track');
   if (format === 2025) assert.ok(/ERS low \(10%\)/.test(titles), 'ERS advice'); else assert.ok(!/ERS/.test(titles), 'no ERS % for 2026');
   // What's in use, straight from the game
   const u = race.inUse();
@@ -117,7 +118,7 @@ for (const format of [2025, 2026]) {
   const tyre = s.pit.items.find((x) => x.title.startsWith('Tyres about'));
   assert.ok(tyre, 'tyre projection');
   const tips = s.adjust.items.map((x) => x.title).join(' | ');
-  assert.ok(/Front lock-ups/.test(tips) && /Front tyres hotter/.test(tips), tips);
+  assert.ok(/Front lock-ups/.test(tips) && !/hotter/.test(tips), tips);
   assert.equal(s.adjust.forza, true);
 }
 

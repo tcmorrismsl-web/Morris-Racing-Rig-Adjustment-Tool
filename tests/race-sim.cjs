@@ -44,8 +44,12 @@ function header(format, id, t, player, uid) {
 // F1 race model: 20 active cars with different pace, the player's pit stop, a safety car.
 // ---------------------------------------------------------------------------
 class F1Sim {
-  constructor({ format = 2025, totalLaps = 15, active = 20, player = 4, uid = 777n } = {}) {
+  // sessionType 15 = race, 5 = Q1. garageUntil: seconds the player sits in the garage (qualifying).
+  // weatherAt: seconds into the session when light rain starts. scAt: seconds when a safety car comes out.
+  constructor({ format = 2025, totalLaps = 15, active = 20, player = 4, uid = 777n, sessionType = 15, garageUntil = 0, weatherAt = null, scAt = null, slowZone = null } = {}) {
     this.format = format; this.n = carsIn(format); this.totalLaps = totalLaps; this.active = active; this.player = player; this.uid = uid;
+    this.sessionType = sessionType; this.garageUntil = garageUntil; this.weatherAt = weatherAt; this.scAt = scAt; this.slowZone = slowZone;
+    this.quali = sessionType >= 5 && sessionType <= 14;
     this.t = 0;
     this.cars = Array.from({ length: this.n }, (_, i) => ({
       i, dist: -i * 18, speed: 70 - i * 0.12 + (i % 3) * 0.05, // m/s
@@ -53,16 +57,26 @@ class F1Sim {
       stints: [], bestMs: 0, laps: [],
     }));
     this.player === undefined || (this.cars[player].speed = 69.4);
+    if (this.quali) this.cars.forEach((c, i) => { c.dist = (i * 263) % TRACK_LEN; c.lapStartT = -(c.dist / c.speed); }); // spread round the lap
+    if (garageUntil) Object.assign(this.cars[player], { garage: true, dist: 0, lapStartT: 0 });
     this.sc = 0;
+    this.events = [];
   }
+  get weather() { return this.weatherAt !== null && this.t >= this.weatherAt ? 3 : 1; }
 
   step(dt) {
     this.t += dt;
     const lapT = TRACK_LEN;
+    const me = this.cars[this.player];
+    if (me.garage && this.t >= this.garageUntil) Object.assign(me, { garage: false, out: true, dist: 300, lapStartT: this.t - 300 / me.speed });
+    if (this.scAt !== null && !this.sc && this.t >= this.scAt) { this.sc = 1; this.events.push(['SCAR', [1, 0]]); }
     for (const c of this.cars.slice(0, this.active)) {
+      if (c.garage) continue;
       const before = Math.floor(c.dist / lapT);
       let v = c.speed;
       if (c.pit) v = 22;
+      // Optional slow zone for the player (e.g. a missed braking point): [fromM, toM, factor]
+      if (this.slowZone && c.i === this.player) { const ld = ((c.dist % TRACK_LEN) + TRACK_LEN) % TRACK_LEN; if (ld >= this.slowZone[0] && ld < this.slowZone[1]) v *= this.slowZone[2]; }
       if (this.sc) v = Math.min(v, 45);
       c.dist += v * dt;
       const after = Math.floor(c.dist / lapT);
@@ -72,7 +86,7 @@ class F1Sim {
           c.lastLapMs = lapMs; c.laps.push(lapMs);
           if (!c.bestMs || lapMs < c.bestMs) c.bestMs = lapMs;
         }
-        c.lapStartT = this.t; c.tyreAge++;
+        c.lapStartT = this.t; c.tyreAge++; c.out = false;
         if (c.pit) { c.pit = 0; }
       }
     }
@@ -80,6 +94,7 @@ class F1Sim {
 
   // Player pits on lap 8 for hards.
   maybePit() {
+    if (this.quali) return;
     const me = this.cars[this.player];
     const lap = Math.floor(me.dist / TRACK_LEN) + 1;
     if (lap === 8 && !me.pitStops && (me.dist % TRACK_LEN) > TRACK_LEN - 300) {
@@ -107,15 +122,16 @@ class F1Sim {
     const size = this.format >= 2026 ? 926 : 753;
     const b = Buffer.alloc(size);
     header(this.format, 1, this.t, this.player, this.uid).copy(b, 0);
-    b.writeUInt8(1, 29); b.writeInt8(32, 30); b.writeInt8(24, 31); b.writeUInt8(this.totalLaps, 32);
-    b.writeUInt16LE(TRACK_LEN, 33); b.writeUInt8(15, 35); b.writeInt8(17, 36);
-    b.writeUInt16LE(3600, 38); b.writeUInt16LE(3600, 40); b.writeUInt8(80, 42);
+    b.writeUInt8(this.weather, 29); b.writeInt8(32, 30); b.writeInt8(24, 31); b.writeUInt8(this.totalLaps, 32);
+    b.writeUInt16LE(TRACK_LEN, 33); b.writeUInt8(this.sessionType, 35); b.writeInt8(17, 36);
+    b.writeUInt16LE(Math.max(0, Math.round((this.quali ? 18 * 60 : 3600) - this.t)), 38); b.writeUInt16LE(3600, 40); b.writeUInt8(80, 42);
     b.writeUInt8(this.sc, 153); b.writeUInt8(0, 154);
     // Forecast: rain 60% in 10 minutes.
     b.writeUInt8(2, 155);
-    [[0, 1, 0], [10, 3, 60]].forEach(([mins, w, rain], k) => {
+    const rainIn = this.weatherAt !== null ? Math.max(1, Math.ceil((this.weatherAt - this.t) / 60)) : 10;
+    [[0, this.weather, 0], [rainIn, 3, this.weatherAt !== null ? 80 : 60]].forEach(([mins, w, rain], k) => {
       const o = 156 + k * 8;
-      b.writeUInt8(15, o); b.writeUInt8(mins, o + 1); b.writeUInt8(w, o + 2); b.writeInt8(32, o + 3); b.writeInt8(2, o + 4); b.writeInt8(24, o + 5); b.writeInt8(2, o + 6); b.writeUInt8(rain, o + 7);
+      b.writeUInt8(this.sessionType, o); b.writeUInt8(mins, o + 1); b.writeUInt8(w, o + 2); b.writeInt8(32, o + 3); b.writeInt8(2, o + 4); b.writeInt8(24, o + 5); b.writeInt8(2, o + 6); b.writeUInt8(rain, o + 7);
     });
     b.writeUInt8(8, 682); b.writeUInt8(10, 683); b.writeUInt8(9, 684);
     b.writeUInt32LE(14 * 60, 696);
@@ -138,15 +154,15 @@ class F1Sim {
       body.writeUInt32LE(Math.max(0, Math.round((this.t - c.lapStartT) * 1000)), o + 4);
       body.writeUInt16LE(gapAhead % 60000, o + 14); body.writeUInt8(Math.floor(gapAhead / 60000), o + 16);
       body.writeUInt16LE(gapLeader % 60000, o + 17); body.writeUInt8(Math.floor(gapLeader / 60000), o + 19);
-      body.writeFloatLE(c.dist < 0 ? c.dist : lapDist, o + 20);
+      body.writeFloatLE(c.garage ? 0 : c.dist < 0 ? c.dist : lapDist, o + 20);
       body.writeFloatLE(c.dist, o + 24);
       body.writeUInt8(k + 1, o + 32);
       body.writeUInt8(Math.max(1, Math.floor(c.dist / TRACK_LEN) + 1), o + 33);
-      body.writeUInt8(c.pit, o + 34); body.writeUInt8(c.pitStops, o + 35);
+      body.writeUInt8(c.garage ? 2 : c.pit, o + 34); body.writeUInt8(c.pitStops, o + 35);
       body.writeUInt8(Math.min(2, Math.floor(lapDist / (TRACK_LEN / 3))), o + 36);
       body.writeUInt8(c.i === 7 ? 5 : 0, o + 38); // car 7 has a 5 s penalty
       body.writeUInt8(c.i + 1, o + 43);
-      body.writeUInt8(c.pit ? 2 : 4, o + 44);
+      body.writeUInt8(c.garage ? 0 : c.pit ? 2 : this.quali ? (c.out ? 3 : c.i % 4 === 0 ? 3 : 1) : 4, o + 44);
       body.writeUInt8(2, o + 45);
     });
     return Buffer.concat([header(this.format, 2, this.t, this.player, this.uid), body]);
@@ -249,6 +265,9 @@ class F1Sim {
     return Buffer.concat([header(this.format, 10, this.t, this.player, this.uid), body]);
   }
 
+  // Wheel button press: UDP Action n (1-12) held for one frame, then released.
+  press(n) { this.events.push(['BUTN', [...Buffer.from(new Uint32Array([2 ** (19 + n)]).buffer)]], ['BUTN', [0, 0, 0, 0]]); }
+
   event(code, bytes = []) {
     const b = Buffer.alloc(45);
     header(this.format, 3, this.t, this.player, this.uid).copy(b, 0);
@@ -268,6 +287,7 @@ class F1Sim {
     for (let r = 0; r < 3; r++) out.push(this.motionEx(braking && ph % 2 ? [-0.3, -0.3, -0.05, -0.05] : exiting ? [0.02, 0.02, 0.3, 0.3] : [0.02, 0.02, 0.03, 0.03]));
     if (k % 10 === 0) out.push(this.session(), this.status(), this.setup(), this.damage([20, 21, 30, 31]));
     if (k % 100 === 0) out.push(this.participants(), this.tyreSets());
+    while (this.events.length) { const [code, bytes] = this.events.shift(); out.push(this.event(code, bytes)); }
     out.push(this.history(k % this.active));
     return out;
   }
@@ -322,7 +342,8 @@ if (require.main === module) {
   const [game = 'f1', host = '127.0.0.1', portArg] = process.argv.slice(2);
   const port = Number(portArg) || (game === 'forza' ? 5300 : 20777);
   const sock = dgram.createSocket('udp4');
-  const sim = game === 'forza' ? new ForzaSim() : new F1Sim({ format: game === 'f1-2026' ? 2026 : 2025 });
+  // f1-quali: qualifying, you start in the garage. f1 / f1-2026: a race with a safety car and rain.
+  const sim = game === 'forza' ? new ForzaSim() : game === 'f1-quali' ? new F1Sim({ format: 2025, sessionType: 5, garageUntil: 40, slowZone: [3000, 3250, 0.7] }) : new F1Sim({ format: game === 'f1-2026' ? 2026 : 2025, scAt: 260, weatherAt: 560, slowZone: [2000, 2250, 0.7] });
   const hz = game === 'forza' ? 60 : 20;
   let k = 0;
   console.log(`Streaming a ${game} race to ${host}:${port}. Ctrl+C to stop.`);

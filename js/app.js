@@ -1,15 +1,15 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvg6oqeh';
-import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvg6oqeh';
-import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvg6oqeh';
-import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvg6oqeh';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvg6oqeh';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvg6oqeh';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvg6oqeh';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvhhorbr';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvhhorbr';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvhhorbr';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvhhorbr';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvhhorbr';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvhhorbr';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvhhorbr';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 20, 12:29 AM'; // set by npm run stamp
+const APP_VERSION = 'Oct 20, 10:24 PM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',

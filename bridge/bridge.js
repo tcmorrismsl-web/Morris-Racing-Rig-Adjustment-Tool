@@ -167,6 +167,13 @@ const server = http.createServer(async (req, res) => {
       if (req.method === 'PUT') { const s = await body(req); appState = s; writeJson(FILES.state, s); return json(res, 200, { ok: true }); }
     }
     if (p === '/api/dash') return json(res, 200, dashFor(url.searchParams.get('game')).state());
+    if (p === '/api/engineer' && req.method === 'POST') {
+      const q = await body(req, 2000);
+      const topics = ['yes', 'no', 'gaps', 'pit', 'time', 'weather', 'tyres', 'repeat'];
+      if (!q || !topics.includes(q.ask)) return json(res, 400, { error: 'unknown question' });
+      const call = dashFor(q.game).eng.ask(q.ask);
+      return json(res, 200, { ok: true, call });
+    }
     if (p === '/api/track') return json(res, 200, dashFor(url.searchParams.get('game')).track());
     if (p === '/dash-events') {
       const game = url.searchParams.get('game');
