@@ -1,8 +1,8 @@
 // Live race dashboard. Reads the bridge's 10-per-second race stream and draws the
 // track map, timing tower, pit options, adjustments and the race engineer.
 
-import * as voice from './voice.js?v=mvhieha6';
-import { lapAdvice } from './advice.js?v=mvhieha6';
+import * as voice from './voice.js?v=mvhj8433';
+import { lapAdvice } from './advice.js?v=mvhj8433';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -335,7 +335,7 @@ $('mic-note').textContent = voice.canListen
 mic.addEventListener('click', () => {
   voice.listen((cmd, said) => {
     if (cmd) ask(cmd);
-    else voice.speak(voice.settings.style === 'flirty' ? `Sorry, I didn't catch that. Say it again for me?` : `Didn't catch that.`);
+    else voice.speak(voice.settings.style !== 'straight' ? `Sorry, I didn't catch that. Say it again for me?` : `Didn't catch that.`);
     $('eng-said').textContent = `You: "${said}"`;
   }, (st) => mic.classList.toggle('listening', st === 'listening'));
 });
@@ -347,8 +347,41 @@ function fillVoices() {
   $('set-voice').innerHTML = list.length ? list.map((v) => `<option value="${esc(v.name)}"${cur && v.name === cur.name ? ' selected' : ''}>${esc(v.name)}</option>`).join('') : '<option>Device default</option>';
 }
 if ('speechSynthesis' in window) speechSynthesis.addEventListener?.('voiceschanged', fillVoices);
+function showEngine() {
+  const oa = $('set-engine').value === 'openai';
+  $('openai-box').hidden = !oa;
+  $('device-voice').hidden = oa;
+  $('device-tip').hidden = oa;
+  const u = voice.settings.usage || { chars: 0 };
+  $('usage').textContent = oa && u.chars ? `This month so far: about $${voice.costEstimate(u.chars).toFixed(2)}.` : '';
+  const err = voice.engineError();
+  $('engine-error').hidden = !err;
+  $('engine-error').textContent = err;
+}
+voice.onEngineError((msg) => {
+  if (msg) $('eng-said').textContent = msg;
+  if ($('eng-dialog').open) showEngine();
+});
+$('set-ovoice').innerHTML = voice.OPENAI_VOICES.map((v) => `<option value="${v.id}">${esc(v.label)}</option>`).join('');
+$('set-engine').addEventListener('change', (e) => {
+  voice.settings.engine = e.target.value;
+  voice.saveSettings();
+  showEngine();
+});
+$('set-okey').addEventListener('change', (e) => {
+  voice.settings.okey = e.target.value.trim();
+  if (voice.settings.okey) voice.settings.engine = 'openai';
+  voice.saveSettings();
+  $('set-engine').value = voice.settings.engine;
+  showEngine();
+});
+$('set-ovoice').addEventListener('change', (e) => { voice.settings.ovoice = e.target.value; voice.saveSettings(); });
 $('eng-settings').addEventListener('click', () => {
   fillVoices();
+  $('set-engine').value = voice.settings.engine;
+  $('set-okey').value = voice.settings.okey;
+  $('set-ovoice').value = voice.settings.ovoice;
+  showEngine();
   $('set-style').innerHTML = voice.STYLES.map((x) => `<option value="${x.id}">${esc(x.label)}</option>`).join('');
   $('set-style').value = voice.settings.style;
   $('set-radio').checked = voice.settings.radio;

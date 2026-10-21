@@ -1,9 +1,11 @@
 // Race engineer voice: turns the bridge's radio calls into speech.
 // Styles: "fiery" (upbeat, flirty, keeps a playful tab of your mistakes), "sultry" (slow and smooth)
-// and "straight" (just the facts). Uses the device's built-in voices.
+// and "straight" (just the facts). Speaks with the device's voices, or OpenAI's realistic voices
+// when a key is set (falls back to the device voice if OpenAI can't be reached).
 
 const STORE = 'mr-engineer';
-const defaults = { v: 2, on: false, style: 'fiery', chat: 'normal', voice: '', name: '', rate: 1, volume: 1, radio: true };
+const defaults = { v: 2, on: false, style: 'fiery', chat: 'normal', voice: '', name: '', rate: 1, volume: 1, radio: true,
+  engine: 'device', okey: '', ovoice: 'marin', usage: { month: '', chars: 0 } };
 export const settings = (() => {
   let s;
   try { s = { ...defaults, ...JSON.parse(localStorage.getItem(STORE) || '{}') }; } catch { s = { ...defaults }; }
@@ -153,8 +155,12 @@ export function speechify(text) {
 // Radio click: a short burst of static and a chirp before each call.
 // ---------------------------------------------------------------------------
 let ctx = null;
+// One audio player, unlocked by a tap, so phones let it play later without one.
+const SILENT = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=';
+let player = null;
 export function unlockAudio() {
   try { ctx = ctx || new (window.AudioContext || window.webkitAudioContext)(); if (ctx.state === 'suspended') ctx.resume(); } catch { ctx = null; }
+  try { if (!player) { player = new Audio(); player.preload = 'auto'; } if (!player.dataset?.unlocked) { player.src = SILENT; player.play().catch(() => {}); if (player.dataset) player.dataset.unlocked = '1'; } } catch { /* no audio element */ }
 }
 function radioClick() {
   if (!settings.radio || !ctx) return 0;
@@ -214,23 +220,113 @@ export function receive(calls) {
 export function catchUp(calls) { for (const c of calls || []) heard.add(c.id); }
 
 function pump() {
-  if (!('speechSynthesis' in window)) return;
   for (let i = queue.length - 1; i >= 0; i--) if (queue[i].priority !== 'high' && Date.now() - queue[i].queued > 20000) queue.splice(i, 1);
   queue.sort((a, b) => RANK[a.priority] - RANK[b.priority] || a.id - b.id);
   const next = queue[0];
   if (!next) return;
   if (speaking) {
-    if (RANK[next.priority] < RANK[speaking.priority]) { speechSynthesis.cancel(); speaking = null; } else return;
+    if (RANK[next.priority] < RANK[speaking.priority]) { halt(); speaking = null; } else return;
   }
   queue.shift();
   speak(next.text, next);
+  // Fetch the next call's audio while this one plays.
+  if (useOpenAI() && queue[0]) openaiAudio(queue[0].text, queue[0]).catch(() => {});
+}
+function halt() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  if (player) { player.onended = null; player.pause(); }
 }
 
 let speakingListener = () => {};
 export function onSpeaking(fn) { speakingListener = fn; }
 
+// ---------------------------------------------------------------------------
+// OpenAI voices: realistic speech, told how to sound for each style.
+// The key stays on this device and is only sent to OpenAI.
+// ---------------------------------------------------------------------------
+export const OPENAI_VOICES = [
+  { id: 'marin', label: 'Marin (most natural)' },
+  { id: 'coral', label: 'Coral (warm, bright)' },
+  { id: 'nova', label: 'Nova (energetic)' },
+  { id: 'shimmer', label: 'Shimmer (soft)' },
+  { id: 'sage', label: 'Sage (calm)' },
+];
+const INSTRUCTIONS = {
+  fiery: 'You are a young woman working as a Formula 1 race engineer, talking to your driver over team radio during a session. Sound upbeat, energetic and happy, playfully flirty and confident, with a teasing smile in your voice. Keep a quick, lively live-radio pace and say numbers crisply.',
+  sultry: 'You are a woman race engineer talking to your driver over team radio. Sound smooth, low and sultry, relaxed and playful, with an unhurried, intimate pace and a warm smile.',
+  straight: 'You are a calm, professional race engineer on team radio. Speak clearly and concisely at a steady pace.',
+};
+const URGENT = ' This call is urgent: say it sharp, punchy and with real energy.';
+const useOpenAI = () => settings.engine === 'openai' && !!settings.okey;
+const audioCache = new Map(); // text -> Promise<blob URL>
+// Rough cost guide: about 1.5 cents per minute of speech, about 15 characters a second.
+export const costEstimate = (chars) => (chars / 15 / 60) * 0.015;
+
+export function openaiAudio(text, call = {}) {
+  const spoken = speechify(text);
+  const key = `${settings.ovoice}|${settings.style}|${call.priority === 'high'}|${spoken}`;
+  if (audioCache.has(key)) return audioCache.get(key);
+  const job = (async () => {
+    const res = await fetch('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${settings.okey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini-tts',
+        voice: settings.ovoice || 'marin',
+        input: spoken.slice(0, 4000),
+        instructions: (INSTRUCTIONS[settings.style] || INSTRUCTIONS.straight) + (call.priority === 'high' ? URGENT : ''),
+        response_format: 'mp3',
+        speed: Math.max(0.5, Math.min(1.5, settings.rate)),
+      }),
+    });
+    if (!res.ok) {
+      const msg = res.status === 401 ? 'OpenAI key not accepted' : res.status === 429 ? 'OpenAI limit reached or out of credit' : `OpenAI error ${res.status}`;
+      throw Object.assign(new Error(msg), { status: res.status });
+    }
+    const url = URL.createObjectURL(await res.blob());
+    // Count what this month's speech has cost (cached lines are free).
+    const month = new Date().toISOString().slice(0, 7);
+    if (settings.usage.month !== month) settings.usage = { month, chars: 0 };
+    settings.usage.chars += spoken.length;
+    saveSettings();
+    return url;
+  })();
+  audioCache.set(key, job);
+  job.catch(() => audioCache.delete(key));
+  if (audioCache.size > 200) audioCache.delete(audioCache.keys().next().value);
+  return job;
+}
+
+let lastError = '';
+let errorListener = () => {};
+export const engineError = () => lastError;
+export function onEngineError(fn) { errorListener = fn; }
+function setError(msg) { if (msg !== lastError) { lastError = msg; errorListener(msg); } }
+
 export function speak(text, call = { priority: 'high' }) {
-  if (!('speechSynthesis' in window)) return;
+  speaking = call;
+  speakingListener(true);
+  const done = () => { speaking = null; speakingListener(false); setTimeout(pump, 350); };
+  if (useOpenAI()) {
+    openaiAudio(text, call).then((url) => {
+      if (speaking !== call) return; // cut off by something more urgent
+      if (!player) player = new Audio();
+      player.src = url;
+      player.volume = settings.volume;
+      player.onended = done;
+      const delay = radioClick();
+      setTimeout(() => player.play().then(() => setError('')).catch(() => { setError('Tap the screen once so the phone lets her speak.'); deviceSpeak(text, done); }), delay);
+    }).catch((e) => {
+      setError(`${e.message}. Using the phone's voice for now.`);
+      if (speaking === call) deviceSpeak(text, done);
+    });
+    return;
+  }
+  deviceSpeak(text, done);
+}
+
+function deviceSpeak(text, done) {
+  if (!('speechSynthesis' in window)) { done(); return; }
   const u = new SpeechSynthesisUtterance(speechify(text));
   const v = pickVoice();
   if (v) { u.voice = v; u.lang = v.lang; }
@@ -238,14 +334,12 @@ export function speak(text, call = { priority: 'high' }) {
   u.rate = Math.max(0.5, Math.min(2, p.rate * settings.rate));
   u.pitch = p.pitch;
   u.volume = settings.volume;
-  speaking = call;
-  speakingListener(true);
-  u.onend = u.onerror = () => { speaking = null; speakingListener(false); setTimeout(pump, 350); };
+  u.onend = u.onerror = done;
   const delay = radioClick();
   setTimeout(() => speechSynthesis.speak(u), delay);
 }
 
-export function stop() { queue.length = 0; if ('speechSynthesis' in window) speechSynthesis.cancel(); speaking = null; speakingListener(false); }
+export function stop() { queue.length = 0; halt(); speaking = null; speakingListener(false); }
 
 // ---------------------------------------------------------------------------
 // Voice replies. Browsers only allow the microphone on a secure page, which the

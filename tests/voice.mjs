@@ -34,6 +34,55 @@ const clean = v.phrase({ kind: 'finish', priority: 'high', text: '', data: { pos
 assert.ok(/Podium/.test(clean) && /earned it/.test(clean), clean);
 v.settings.style = 'straight';
 assert.equal(v.phrase({ kind: 'pos-lost', priority: 'normal', text: 'Lost one to GASLY. P9.', data: { pos: 9, name: 'GASLY' } }), 'Lost one to Gasly. P9.');
+
+// OpenAI voice: request shape, caching, cost tally, and fallback to the device voice
+{
+  const calls = [];
+  let fail = false;
+  globalThis.fetch = async (url, opts) => {
+    calls.push({ url, opts, body: JSON.parse(opts.body) });
+    if (fail) return { ok: false, status: 401 };
+    return { ok: true, blob: async () => new Blob(['mp3']) };
+  };
+  globalThis.URL.createObjectURL = () => 'blob:audio';
+  const played = [];
+  globalThis.Audio = class { play() { played.push(this.src); setTimeout(() => this.onended?.(), 1); return Promise.resolve(); } pause() {} };
+  const spoken = [];
+  globalThis.window.speechSynthesis = { speak: (u) => { spoken.push(u.text); setTimeout(() => u.onend?.(), 1); }, cancel() {}, getVoices: () => [] };
+  globalThis.speechSynthesis = globalThis.window.speechSynthesis;
+  globalThis.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+  Object.assign(v.settings, { engine: 'openai', okey: 'sk-test', ovoice: 'marin', style: 'fiery', radio: false, usage: { month: '', chars: 0 } });
+
+  v.speak('Box box. 0.75 to Norris.', { priority: 'high' });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(calls.length, 1);
+  const c = calls[0];
+  assert.equal(c.url, 'https://api.openai.com/v1/audio/speech');
+  assert.equal(c.opts.headers.Authorization, 'Bearer sk-test');
+  assert.equal(c.body.model, 'gpt-4o-mini-tts');
+  assert.equal(c.body.voice, 'marin');
+  assert.equal(c.body.input, 'Box box. eight tenths to Norris.');
+  assert.ok(/flirty/.test(c.body.instructions) && /urgent/.test(c.body.instructions));
+  assert.deepEqual(played, ['blob:audio']);
+  assert.ok(v.settings.usage.chars > 0);
+
+  // Same line again: from the cache, no second charge
+  v.speak('Box box. 0.75 to Norris.', { priority: 'high' });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(calls.length, 1, 'cached');
+  assert.equal(played.length, 2);
+
+  // Bad key: says it on the phone's voice instead and reports why
+  fail = true;
+  let err = '';
+  v.onEngineError((m) => { err = m; });
+  v.speak('Weather is dry.', { priority: 'normal' });
+  await new Promise((r) => setTimeout(r, 30));
+  assert.deepEqual(spoken, ['Weather is dry.']);
+  assert.ok(/key not accepted/.test(err), err);
+  assert.ok(v.costEstimate(7000) < 0.15, 'a race costs pennies');
+  console.log('OK: OpenAI voice checks passed; 7,000 characters ≈ $' + v.costEstimate(7000).toFixed(3));
+}
 console.log('OK: voice checks passed');
 console.log('Sample:', all.slice(0, 3).join(' | '));
 console.log('Finish:', fin);
