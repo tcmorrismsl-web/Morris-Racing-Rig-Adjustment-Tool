@@ -1,22 +1,23 @@
-import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvhjp0ub';
-import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvhjp0ub';
-import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvhjp0ub';
-import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvhjp0ub';
-import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvhjp0ub';
-import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvhjp0ub';
-import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvhjp0ub';
+import { WHEEL_PROFILES, SWITCH_TIPS, APP_GUIDE, FORZA_TRACKS, FORZA_CLASSES, F1_TRACKS, F1_RANGES } from './data.js?v=mvhlfowh';
+import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES, FORZA_ISSUES, DRIVETRAINS } from './forza.js?v=mvhlfowh';
+import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from './f1.js?v=mvhlfowh';
+import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from './cars.js?v=mvhlfowh';
+import { STATS, SPECS, PARTS, TYRES, classFromPi, normalizeCar, upsertCar, hasPart } from './garage.js?v=mvhlfowh';
+import { pfState, pfSplit, PF_GARAGE, PF_WHEEL, PF_NOTE, PF_DRIVING } from './parcferme.js?v=mvhlfowh';
+import { lapAdvice, lapStats, sessions, fmtLap } from './advice.js?v=mvhlfowh';
+import { live, detectBridge, connect, putContext, putState, getRemoteState, deleteSession } from './live.js?v=mvhlfowh';
 
 // ---------------------------------------------------------------------------
 // State (kept in this browser only)
 // ---------------------------------------------------------------------------
-const APP_VERSION = 'Oct 20, 11:21 PM'; // set by npm run stamp
+const APP_VERSION = 'Oct 21, 12:09 AM'; // set by npm run stamp
 const KEY = 'morris-racing-v1';
 const defaults = {
   game: 'forza',
   tab: 'wheel',
   wheelSetFor: null,
   forza: { carId: '', track: 'fujimi', cls: 'A', drivetrain: 'fwd', weather: 'dry', time: 'night', temp: 'mild', length: 'medium', laps: 3, start: '20:00', compound: 'medium', tyreWear: true, fuel: false, aero: true, compare: false, feel: 'forgiving' },
-  f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced', dist: '25', laps: '', compound: 'medium' },
+  f1: { era: 2025, track: 'australia', session: 'race', weather: 'dry', style: 'balanced', dist: '25', laps: '', compound: 'medium', pf: 'auto' },
   saved: [],
   current: {}, // values in the game now, per garage car ('_any' when no car is picked)
   links: { forzaCars: {}, forzaTracks: {} }, // Forza car/track numbers from telemetry, linked to your garage and track list
@@ -82,7 +83,7 @@ function sweepLeds() {
 // Shared bits
 // ---------------------------------------------------------------------------
 const row = (k, v, why, opts = {}) => `
-  <div class="row${String(v).length > 16 ? ' long' : ''}">
+  <div class="row${String(v).length > 16 ? ' long' : ''}${opts.cls ? ` ${opts.cls}` : ''}">
     <span class="k">${esc(k)}</span>
     <span class="v${opts.rel ? ' rel' : ''}">${esc(v)}</span>
     ${opts.range ? `<span class="range">${esc(opts.range)}</span>` : ''}
@@ -244,6 +245,17 @@ const COMPOUND_LABEL = { soft: 'Soft', medium: 'Medium', hard: 'Hard', inter: 'I
 // Smallest change worth flagging for each setting.
 const F1_STEP = { frontWing: 1, rearWing: 1, diffOn: 5, diffOff: 5, frontCamber: 0.1, rearCamber: 0.1, frontToe: 0.05, rearToe: 0.05, frontSusp: 1, rearSusp: 1, frontArb: 1, rearArb: 1, frontRide: 1, rearRide: 1, brakePressure: 1, brakeBias: 1, frontTyre: 0.2, rearTyre: 0.2 };
 
+// Parc fermé: what's locked right now (the app setting, or the game when set to Auto).
+const f1Pf = () => pfState(state.f1.pf || 'auto', f1InUse()?.parcFerme || null);
+const PF_OPTIONS = [{ id: 'auto', label: 'Auto (from the game)' }, { id: 'on', label: 'Locked' }, { id: 'off', label: 'Not locked' }];
+const pfAllowed = (k) => PF_GARAGE.includes(k) || PF_WHEEL.includes(k);
+const pfHow = (k) => (PF_GARAGE.includes(k) ? 'Change it in the garage or at a stop.' : 'Change it from the wheel on track.');
+function pfBanner(pf) {
+  if (pf.on) return `<div class="live-card pf on"><b>Parc fermé</b><span class="small">${esc(pf.reason || '')} ${esc(PF_NOTE)}</span></div>`;
+  if (pf.soon) return `<div class="live-card pf soon"><b>Parc fermé starts when you leave the garage</b><span class="small">Make any setup changes before your first qualifying run. After that only the front wing can change.</span></div>`;
+  return '';
+}
+
 function f1InputsFromGame(u) {
   const out = { era: u.era };
   if (u.track && F1_TRACKS.some((t) => t.id === u.track)) out.track = u.track;
@@ -263,6 +275,7 @@ function renderInUseF1() {
   const u = f1InUse();
   if (!u) return `<div class="empty">Waiting for F1 25. Start a session and the track, session, weather, tyres and the setup on your car fill in here automatically.</div>`;
   const rec = f1Setup({ ...state.f1, ...f1InputsFromGame(u), style: state.f1.style });
+  const pf = f1Pf();
   const rows = !u.setup ? '<p class="small">The game hasn\'t sent your setup yet. It arrives a few seconds into the session.</p>'
     : F1_ROWS.map((g) => `
       <h4 class="sub">${esc(g.group)}</h4>
@@ -270,14 +283,17 @@ function renderInUseF1() {
         const fmt = (n) => (n === null || n === undefined ? '–' : `${dp ? Number(n).toFixed(dp) : n}${unit}`);
         const cur = u.setup[k], sug = rec.v[k];
         const off = cur !== null && sug !== undefined && Math.abs(cur - sug) >= F1_STEP[k] - 1e-9;
-        return `<div class="row inuse${off ? ' off' : ''}"><span class="k">${esc(label)}</span><span class="v">${fmt(cur)}</span>
-          <span class="why">${off ? `Suggested ${fmt(sug)}: ${cur < sug ? 'raise' : 'lower'} by ${fmt(Math.round(Math.abs(sug - cur) * 100) / 100).replace(unit, '')}${unit}` : 'Matches the suggestion'}</span></div>`;
+        const locked = pf.on && !pfAllowed(k);
+        const why = locked ? 'Locked (parc fermé)' : off ? `Suggested ${fmt(sug)}: ${cur < sug ? 'raise' : 'lower'} by ${fmt(Math.round(Math.abs(sug - cur) * 100) / 100).replace(unit, '')}${unit}${pf.on ? `. ${pfHow(k)}` : ''}` : 'Matches the suggestion';
+        return `<div class="row inuse${off && !locked ? ' off' : ''}${locked ? ' locked' : ''}"><span class="k">${esc(label)}</span><span class="v">${fmt(cur)}</span>
+          <span class="why">${why}</span></div>`;
       }).join('')}</div>`).join('');
-  const diffs = u.setup ? F1_ROWS.flatMap((g) => g.items).filter(([k]) => Math.abs(u.setup[k] - rec.v[k]) >= F1_STEP[k] - 1e-9).length : 0;
+  const diffs = u.setup ? F1_ROWS.flatMap((g) => g.items).filter(([k]) => (!pf.on || pfAllowed(k)) && Math.abs(u.setup[k] - rec.v[k]) >= F1_STEP[k] - 1e-9).length : 0;
   return `
     <div class="live-card inuse-head"><b>${esc(liveF1Summary(u))}</b>
-      ${u.setup ? `<span class="small">${diffs ? `${diffs} setting${diffs === 1 ? '' : 's'} differ from the app's suggestion for this session (${esc(F1_STYLES.find((x) => x.id === state.f1.style).label.toLowerCase())} feel).` : 'Your setup matches the app\'s suggestion.'} Fuel ${u.setup.fuelLoad} kg.</span>` : ''}
+      ${u.setup ? `<span class="small">${diffs ? `${diffs} ${pf.on ? 'changeable ' : ''}setting${diffs === 1 ? '' : 's'} differ from the app's suggestion for this session (${esc(F1_STYLES.find((x) => x.id === state.f1.style).label.toLowerCase())} feel).` : pf.on ? 'Nothing you can still change differs from the suggestion.' : 'Your setup matches the app\'s suggestion.'} Fuel ${u.setup.fuelLoad} kg.</span>` : ''}
     </div>
+    ${pfBanner(pf)}
     <div class="actions"><button type="button" class="btn ghost" data-action="f1-from-game">Use these in the Setup tab</button></div>
     ${rows}
     <p class="hint">Read from the game. Every lap is logged with the setup and tyres in use, so you can compare them later.</p>`;
@@ -293,6 +309,7 @@ function renderF1() {
   const race = f.session === 'race';
   const res = f1Setup(f1Input());
   const ta = res.tyreAdvice;
+  const pf = f1Pf();
   view.innerHTML = `
     <h2>F1 25 setup</h2>
     <p class="lede">Full setup-screen values. Enter them in Car Setup before the session.</p>
@@ -308,7 +325,9 @@ function renderF1() {
       ${field('Weather', seg('weather', [{ id: 'dry', label: 'Dry' }, { id: 'wet', label: 'Wet' }], f.weather))}
       ${field('Feel', seg('style', F1_STYLES, f.style))}
       <p class="small wide">${esc(F1_STYLES.find((s) => s.id === f.style).hint)}</p>
+      ${field('Parc fermé', seg('pf', PF_OPTIONS, f.pf || 'auto'), true)}
     </div>
+    ${pfBanner(pf)}
     <h3>Tyre strategy</h3>
     <div class="rows">${row(race ? 'Starting tyre' : 'Tyre', ta.compound, ta.ok ? `Good choice. ${ta.plan}` : `${ta.best} is the better choice. ${ta.plan}`)}</div>
     ${F1_ROWS.map((g) => `
@@ -316,7 +335,8 @@ function renderF1() {
       <div class="rows">${g.items.map(([k, label, unit = '', dp = 0]) => {
         const r = F1_RANGES[k];
         const fmt = (n) => (dp ? Number(n).toFixed(dp) : String(n));
-        return row(label, `${fmt(res.v[k])}${unit}`, res.why[k], { range: `${fmt(r[0])} to ${fmt(r[1])}` });
+        const locked = pf.on && !pfAllowed(k);
+        return row(label, `${fmt(res.v[k])}${unit}`, locked ? 'Locked under parc fermé. Use this next time the car is open.' : pf.on ? `${res.why[k]} ${pfHow(k)}` : res.why[k], { range: `${fmt(r[0])} to ${fmt(r[1])}`, cls: locked ? 'locked' : '' });
       }).join('')}</div>`).join('')}
     <ul class="notes">${res.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
     <div class="actions"><button type="button" class="btn" data-action="save">Save this setup</button></div>`;
@@ -331,14 +351,23 @@ function renderFix() {
   const issues = forza ? FORZA_ISSUES : F1_ISSUES;
   const car = currentCar();
   const dt = car ? car.drivetrain : state.forza.drivetrain;
+  const pf = forza ? { on: false } : f1Pf();
   view.innerHTML = `
     <h2>Fix the handling</h2>
     <p class="lede">${forza ? `Pick what the car is doing. Steps are for ${car ? `your ${esc(car.name)} (${dtLabel(dt)})` : `a ${dtLabel(dt)} car`}; change the car on the Setup tab. Make one change, drive a lap, then try the next.` : 'Pick what the car is doing. Make one change, drive a lap, then try the next.'}</p>
+    ${forza ? '' : `<div class="form">${field('Parc fermé', seg('pf', PF_OPTIONS, state.f1.pf || 'auto'), true)}</div>${pfBanner(pf)}`}
     <div class="issues">${issues.map((i) => {
       const open = openIssue === i.id;
       const steps = forza ? forzaFix(i.id, dt) : f1Fix(i.id);
+      let body = `<ol class="steps">${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>`;
+      if (!forza && pf.on) {
+        const sp = pfSplit(steps);
+        const ok = sp.ok.length ? sp.ok : [{ text: PF_DRIVING[i.id], how: 'Driving' }];
+        body = `<ol class="steps">${ok.map((x) => `<li>${esc(x.text)} <span class="how">${esc(x.how)}</span></li>`).join('')}</ol>
+          ${sp.locked.length ? `<p class="small locked-list">Locked until the race is over: ${esc(sp.locked.join(' '))}</p>` : ''}`;
+      }
       return `<button type="button" class="issue" data-issue="${i.id}" aria-expanded="${open}">${esc(i.label)}</button>
-        ${open ? `<ol class="steps">${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}`;
+        ${open ? body : ''}`;
     }).join('')}</div>`;
 }
 
@@ -647,6 +676,7 @@ function renderData() {
   view.innerHTML = `
     <h2>Live data</h2>
     <div class="live-card" id="live-line">${liveLine(g)}</div>
+    ${live.status?.app?.bridgeStaged ? `<p class="live-card small">Bridge update ${esc(live.status.app.bridgeStaged)} is downloaded. It switches over by itself the next time you're not driving.</p>` : ''}
     ${live.status?.app?.bridgeUpdate ? '<p class="live-card small">A newer bridge is available with new features. <a href="https://github.com/tcmorrismsl-web/Morris-Racing-Rig-Adjustment-Tool/raw/main/dist/MorrisRacingBridge.zip">Download it</a>, unzip it over the old one and start it again.</p>' : ''}
     <a class="btn dash-link" href="dash.html?game=${g}">Race dashboard</a>
     <p class="small">Track map, ${g === 'f1' ? 'timing tower, pit options and on-track adjustments' : 'lap timing with a live delta, fuel and tyre estimates and driving tips'}. Best on a tablet or a phone turned sideways.</p>

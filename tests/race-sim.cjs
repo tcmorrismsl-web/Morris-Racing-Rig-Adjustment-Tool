@@ -46,7 +46,10 @@ function header(format, id, t, player, uid) {
 class F1Sim {
   // sessionType 15 = race, 5 = Q1. garageUntil: seconds the player sits in the garage (qualifying).
   // weatherAt: seconds into the session when light rain starts. scAt: seconds when a safety car comes out.
-  constructor({ format = 2025, totalLaps = 15, active = 20, player = 4, uid = 777n, sessionType = 15, garageUntil = 0, weatherAt = null, scAt = null, slowZone = null } = {}) {
+  // gridS: seconds sat on the grid before the start (the last formationS of them on the formation lap),
+  // then lights out. parcFerme / weekend: the game's parc fermé option and the weekend's session list.
+  constructor({ format = 2025, totalLaps = 15, active = 20, player = 4, uid = 777n, sessionType = 15, garageUntil = 0, weatherAt = null, scAt = null, slowZone = null, gridS = 0, formationS = 0, parcFerme = false, weekend = [] } = {}) {
+    this.gridS = gridS; this.formationS = formationS; this.grid = gridS > 0; this.parcFerme = parcFerme; this.weekend = weekend;
     this.format = format; this.n = carsIn(format); this.totalLaps = totalLaps; this.active = active; this.player = player; this.uid = uid;
     this.sessionType = sessionType; this.garageUntil = garageUntil; this.weatherAt = weatherAt; this.scAt = scAt; this.slowZone = slowZone;
     this.quali = sessionType >= 5 && sessionType <= 14;
@@ -67,6 +70,11 @@ class F1Sim {
   step(dt) {
     this.t += dt;
     const lapT = TRACK_LEN;
+    if (this.grid) {
+      this.sc = this.formationS && this.t >= this.gridS - this.formationS ? 3 : 0;
+      if (this.t >= this.gridS) { this.grid = false; this.sc = 0; this.events.push(['LGOT', []]); this.cars.forEach((c) => { c.lapStartT = this.t; }); }
+      else return;
+    }
     const me = this.cars[this.player];
     if (me.garage && this.t >= this.garageUntil) Object.assign(me, { garage: false, out: true, dist: 300, lapStartT: this.t - 300 / me.speed });
     if (this.scAt !== null && !this.sc && this.t >= this.scAt) { this.sc = 1; this.events.push(['SCAR', [1, 0]]); }
@@ -135,6 +143,8 @@ class F1Sim {
     });
     b.writeUInt8(8, 682); b.writeUInt8(10, 683); b.writeUInt8(9, 684);
     b.writeUInt32LE(14 * 60, 696);
+    b.writeUInt8(0, 713); b.writeUInt8(this.parcFerme ? 1 : 0, 723); b.writeUInt8(this.formationS ? 1 : 0, 727);
+    b.writeUInt8(this.weekend.length, 732); this.weekend.forEach((t, k) => b.writeUInt8(t, 733 + k));
     b.writeFloatLE(1800, 745); b.writeFloatLE(3600, 749);
     return b;
   }
@@ -283,7 +293,8 @@ class F1Sim {
     const out = [this.motion(), this.lap()];
     const ph = k % 40;
     const braking = ph >= 20 && ph < 26, exiting = ph >= 30;
-    out.push(this.telemetry({ speedKmh: braking ? 160 : 260, throttle: braking ? 0 : 1, brake: braking ? 0.9 : 0, tF: 98, tR: 109 }));
+    const parked = this.cars[this.player].garage || this.grid;
+    out.push(this.telemetry({ speedKmh: parked ? 0 : braking ? 160 : 260, throttle: braking ? 0 : 1, brake: braking ? 0.9 : 0, tF: 98, tR: 109 }));
     for (let r = 0; r < 3; r++) out.push(this.motionEx(braking && ph % 2 ? [-0.3, -0.3, -0.05, -0.05] : exiting ? [0.02, 0.02, 0.3, 0.3] : [0.02, 0.02, 0.03, 0.03]));
     if (k % 10 === 0) out.push(this.session(), this.status(), this.setup(), this.damage([20, 21, 30, 31]));
     if (k % 100 === 0) out.push(this.participants(), this.tyreSets());
@@ -343,7 +354,12 @@ if (require.main === module) {
   const port = Number(portArg) || (game === 'forza' ? 5300 : 20777);
   const sock = dgram.createSocket('udp4');
   // f1-quali: qualifying, you start in the garage. f1 / f1-2026: a race with a safety car and rain.
-  const sim = game === 'forza' ? new ForzaSim() : game === 'f1-quali' ? new F1Sim({ format: 2025, sessionType: 5, garageUntil: 40, slowZone: [3000, 3250, 0.7] }) : new F1Sim({ format: game === 'f1-2026' ? 2026 : 2025, scAt: 260, weatherAt: 560, slowZone: [2000, 2250, 0.7] });
+  // f1-start: grid, formation lap and lights out, in a weekend with parc fermé on.
+  const garageS = Number(process.env.SIM_GARAGE) || 40;
+  const sim = game === 'forza' ? new ForzaSim()
+    : game === 'f1-quali' ? new F1Sim({ format: 2025, sessionType: 5, garageUntil: garageS, slowZone: [3000, 3250, 0.7], parcFerme: true, weekend: [1, 2, 3, 5, 6, 7, 15] })
+      : game === 'f1-start' ? new F1Sim({ format: 2025, gridS: 40, formationS: 20, parcFerme: true, weekend: [1, 2, 3, 5, 6, 7, 15], slowZone: [2000, 2250, 0.7] })
+        : new F1Sim({ format: game === 'f1-2026' ? 2026 : 2025, scAt: 260, weatherAt: 560, slowZone: [2000, 2250, 0.7] });
   const hz = game === 'forza' ? 60 : 20;
   let k = 0;
   console.log(`Streaming a ${game} race to ${host}:${port}. Ctrl+C to stop.`);

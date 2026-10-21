@@ -57,7 +57,9 @@ const pet = () => (settings.name ? settings.name : pick(['handsome', 'babe', 'go
 // Mistakes this session. She keeps count, but as flirting: a reminder of what a clean
 // drive earns after the race, never a telling-off.
 let mistakes = 0;
+let wins = 0; // positions gained, personal bests, fastest laps
 const strike = () => { mistakes += 1; return mistakes; };
+export const scoreboard = () => ({ mistakes, wins });
 const tally = () => (mistakes === 0 ? ''
   : mistakes === 1 ? pick([" That's one on your tab. Keep it clean and there's something nice waiting for you after the race.", ' One little slip. Stay tidy and you still get your reward.'])
     : mistakes === 2 ? pick([" That's two. You're making me wait for that reward, babe.", ' Two now. Win me back with a clean lap.'])
@@ -75,7 +77,11 @@ const FIERY = {
   },
   'pos-gain': (c) => `${pick(['Yes!', 'Oh yes!', 'Beautiful!'])} P${c.data.pos}${c.data.name ? `, goodbye ${name(c.data.name)}` : ''}! ${pick(["That's my driver.", 'I love it.', 'Do it again.'])}${reward()}`,
   'pos-lost': (c) => { strike(); return `${c.data.name ? `Did you just let ${name(c.data.name)} through?` : 'We just lost a place.'} P${c.data.pos}. ${pick(['Go get it back if you want my attention.', 'Get it back for me. Now.'])}${tally()}`; },
-  'leave-go': () => pick([`Go, go, go! Gap's yours, ${pet()}!`, 'Now! Out you go, clean air, go!']),
+  'leave-go': (c) => (c.ask ? `${pick([`Gap at pit exit, ${pet()}!`, 'Clean air at pit exit!'])}${c.data?.clearForS ? ` Clear for about ${Math.min(60, c.data.clearForS)} seconds.` : ''} Going?` : `Track's clear, ${pet()}. Go whenever you like.`),
+  briefing: (c) => `${c.text} ${pick(["Now go make me proud. I'll be right here in your ear.", "Drive it clean and I'll be very, very happy with you."])}`,
+  formation: (c) => `${c.text} Get those tyres nice and hot for me.`,
+  lights: () => pick(['Lights out! Go, go, go!', 'Lights out, babe! Go!']),
+  'parc-ferme': (c) => `${c.text} Last chance to fiddle with the car, ${pet()}.`,
   'leave-wait': (c) => `${c.text} ${pick(['Patience, babe.', "Sit tight, I've got you."])}`,
   'leave-by': (c) => `${c.text} Do not keep me waiting.`,
   'box-now': (c) => `Box, box! ${pick(['Come to me.', 'Bring it in.'])} ${c.text.replace(/^Box this lap, box this lap\.\s*/, '')}`,
@@ -114,7 +120,9 @@ const SULTRY = {
   'lap-done': (c) => (c.data?.delta < 0 ? `Ooh, personal best. ${c.text} I felt that one.` : `${c.text}${c.data?.invalid ? '' : pick([' Nice.', ' Smooth.', ''])}`),
   'pos-gain': (c) => `P${c.data.pos}. ${pick(['Oh, that was lovely', 'Mm, I liked that move'])}${c.data.name ? ` on ${name(c.data.name)}` : ''}.`,
   'pos-lost': (c) => `${c.data.name ? `${name(c.data.name)} got by` : 'We lost one'}. P${c.data.pos}. Go get it back for me, ${pet()}.`,
-  'leave-go': () => `Now, ${pet()}. Gap at pit exit. Go.`,
+  'leave-go': (c) => (c.ask ? `Gap at pit exit, ${pet()}.${c.data?.clearForS ? ` Clear for about ${Math.min(60, c.data.clearForS)} seconds.` : ''} Going?` : `Track's clear, ${pet()}. Whenever you're ready.`),
+  briefing: (c) => `${c.text} Take your time. I'll be with you every lap.`,
+  formation: (c) => `${c.text} Nice and warm for me.`,
   'box-now': (c) => `Box, box, ${pet()}. ${c.text.replace(/^Box this lap, box this lap\.\s*/, '')}`,
   'final-lap': (c) => `Last lap, ${pet()}. P${c.data?.pos ?? ''}. Bring it home to me.`,
   finish: (c) => `Chequered flag. P${c.data.pos}. ${c.data.pos <= 3 ? 'You were incredible out there.' : 'Come back to me in one piece.'}`,
@@ -205,7 +213,9 @@ export function receive(calls) {
   for (const c of calls || []) {
     if (heard.has(c.id)) continue;
     heard.add(c.id);
-    if (c.kind === 'session') mistakes = 0;
+    if (c.kind === 'session' || c.kind === 'briefing') { mistakes = 0; wins = 0; }
+    if (c.kind === 'pos-gain' || (c.kind === 'lap-done' && c.data?.delta < 0 && !c.data?.invalid) || (c.kind === 'fastest-lap' && c.data?.me)) wins += 1;
+    if (settings.style === 'straight' && (c.kind === 'pos-lost' || c.kind === 'penalty' || (c.kind === 'lap-done' && c.data?.invalid))) strike();
     const text = phrase(c);
     transcript.unshift({ id: c.id, text, kind: c.kind, priority: c.priority, ask: c.ask });
     transcript.length = Math.min(transcript.length, 12);
@@ -216,11 +226,33 @@ export function receive(calls) {
   pump();
 }
 
+// Forget queued calls of these kinds (e.g. pit-exit calls once you've left the garage).
+export function drop(kindRe) {
+  for (let i = queue.length - 1; i >= 0; i--) if (kindRe.test(queue[i].kind)) queue.splice(i, 1);
+  if (speaking && kindRe.test(speaking.kind || '')) { halt(); speaking = null; speakingListener(false); setTimeout(pump, 200); }
+}
+
+// Something she says that didn't come from the bridge: replies when you talk to her.
+export function say(text, kind = 'chat') {
+  const id = `local-${Date.now()}`;
+  transcript.unshift({ id, text, kind, priority: 'high' });
+  transcript.length = Math.min(transcript.length, 12);
+  onChange();
+  if (!settings.on) return;
+  queue.push({ id: Number.MAX_SAFE_INTEGER, kind, priority: 'high', text, queued: Date.now(), ttlS: 30 });
+  pump();
+}
+export function youSaid(text) { transcript.unshift({ id: `you-${Date.now()}`, text: `You: ${text}`, kind: 'you', priority: 'low' }); transcript.length = Math.min(transcript.length, 12); onChange(); }
+
 // Mark everything already on the radio as heard, so opening the dashboard mid-race doesn't replay it.
 export function catchUp(calls) { for (const c of calls || []) heard.add(c.id); }
 
 function pump() {
-  for (let i = queue.length - 1; i >= 0; i--) if (queue[i].priority !== 'high' && Date.now() - queue[i].queued > 20000) queue.splice(i, 1);
+  // Drop calls that are no longer worth saying: their own time limit, or 20 s for chatter.
+  for (let i = queue.length - 1; i >= 0; i--) {
+    const q = queue[i], age = Date.now() - q.queued;
+    if ((q.ttlS && age > q.ttlS * 1000) || (q.priority !== 'high' && age > 20000)) queue.splice(i, 1);
+  }
   queue.sort((a, b) => RANK[a.priority] - RANK[b.priority] || a.id - b.id);
   const next = queue[0];
   if (!next) return;
@@ -251,18 +283,39 @@ export const OPENAI_VOICES = [
   { id: 'shimmer', label: 'Shimmer (soft)' },
   { id: 'sage', label: 'Sage (calm)' },
 ];
-const INSTRUCTIONS = {
-  fiery: 'You are a young woman working as a Formula 1 race engineer, talking to your driver over team radio during a session. Sound upbeat, energetic and happy, playfully flirty and confident, with a teasing smile in your voice. Keep a quick, lively live-radio pace and say numbers crisply.',
-  sultry: 'You are a woman race engineer talking to your driver over team radio. Sound smooth, low and sultry, relaxed and playful, with an unhurried, intimate pace and a warm smile.',
-  straight: 'You are a calm, professional race engineer on team radio. Speak clearly and concisely at a steady pace.',
+// How she sounds, written the way OpenAI's voice model follows best: one line per quality,
+// with the driver's own description (accent, character) first so it takes priority.
+const PROFILE = {
+  fiery: {
+    voice: 'A young woman, a Formula 1 race engineer on team radio from the pit wall.',
+    tone: 'Upbeat, happy and confident, playfully flirty, with a teasing smile you can hear.',
+    pacing: 'Quick and lively, like live radio. Numbers said crisply.',
+    emotion: 'Excited when things go well, cheeky when he slips up, never cold.',
+  },
+  sultry: {
+    voice: 'A woman race engineer on team radio.',
+    tone: 'Smooth, low and sultry, relaxed and playful, with a warm smile.',
+    pacing: 'Unhurried and intimate, small pauses before the good bits.',
+    emotion: 'Calm, affectionate and teasing.',
+  },
+  straight: {
+    voice: 'A race engineer on team radio.',
+    tone: 'Calm, clear and professional.',
+    pacing: 'Steady and concise.',
+    emotion: 'Focused.',
+  },
 };
-const URGENT = ' This call is urgent: say it sharp, punchy and with real energy.';
-// The chosen style, plus anything the driver wrote in "How she sounds" (that wins if they clash).
 export function instructionsFor(call = {}) {
   const own = (settings.sound || '').trim().slice(0, 600);
-  return (INSTRUCTIONS[settings.style] || INSTRUCTIONS.straight)
-    + (own ? ` Most importantly, follow this description of how to sound, even where it differs from the above: ${own}` : '')
-    + (call.priority === 'high' ? URGENT : '');
+  const p = PROFILE[settings.style] || PROFILE.straight;
+  return [
+    own ? `Accent and character (most important; keep it on every word, even where the lines below differ): ${own}` : '',
+    `Voice: ${p.voice}`,
+    `Tone: ${p.tone}`,
+    `Pacing: ${p.pacing}`,
+    `Emotion: ${p.emotion}`,
+    call.priority === 'high' && call.kind !== 'chat' ? 'Urgency: this call is urgent, say it sharp and punchy with real energy.' : '',
+  ].filter(Boolean).join('\n');
 }
 const useOpenAI = () => settings.engine === 'openai' && !!settings.okey;
 const audioCache = new Map(); // text -> Promise<blob URL>

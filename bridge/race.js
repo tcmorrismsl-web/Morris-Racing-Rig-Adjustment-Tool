@@ -95,6 +95,7 @@ class F1Race {
     this.roll = new Rolling();
     this.lastSeen = 0;
     this.curInvalid = false; this.lastLapInvalid = false; this.myLapNum = null;
+    this.leftGarage = false;
     this.eng = new F1Engineer(this);
   }
 
@@ -128,6 +129,7 @@ class F1Race {
           if (this.myLapNum !== null && mine.lapNum !== this.myLapNum) { this.lastLapInvalid = this.curInvalid; this.curInvalid = false; }
           this.myLapNum = mine.lapNum;
           if (mine.invalid) this.curInvalid = true;
+          if (mine.driverStatus !== undefined && mine.driverStatus !== 0) this.leftGarage = true;
         }
         this.eng.onLap();
         break;
@@ -237,7 +239,8 @@ class F1Race {
     rows.sort((a, b) => a.pos - b.pos);
     // Practice and qualifying: gaps come from best laps.
     if (!race) {
-      const best = rows.find((r) => r.bestMs)?.bestMs;
+      const times = rows.map((r) => r.bestMs).filter((v) => v > 0);
+      const best = times.length ? Math.min(...times) : null;
       rows.forEach((r, k) => {
         r.gapLeaderMs = best && r.bestMs ? r.bestMs - best : null;
         r.gapAheadMs = k && r.bestMs && rows[k - 1].bestMs ? r.bestMs - rows[k - 1].bestMs : null;
@@ -284,6 +287,7 @@ class F1Race {
       engineer: this.eng.state(),
       sessionId: this.uid ? `f1-${this.uid}` : null,
       inUse: this.inUse(),
+      parcFerme: this.parcFerme(),
     };
   }
 
@@ -387,6 +391,28 @@ class F1Race {
     return 'track';
   }
 
+  // Parc fermé, when the game's parc fermé rules are on: the setup locks when you first drive out
+  // in qualifying and stays locked through the race. On sprint weekends it opens again after the
+  // sprint, so the Grand Prix qualifying starts open. Only the front wing can change in the garage
+  // (and at a race stop); brake bias and the on-throttle diff still change from the wheel.
+  parcFerme() {
+    const s = this.session;
+    const t = s.sessionType;
+    if (!t || t === 18 || !s.parcFermeRules) return { on: false, soon: false, rules: !!s.parcFermeRules, reason: s.parcFermeRules === false && t ? 'Parc fermé rules are off for this event.' : null };
+    const isQ = (x) => x >= 5 && x <= 14;
+    const w = Array.isArray(s.weekend) ? s.weekend : [];
+    const idx = w.indexOf(t);
+    let earlierQ = false;
+    for (let k = idx - 1; k >= 0 && !isRace(w[k]); k--) if (isQ(w[k])) earlierQ = true;
+    if (isRace(t)) return earlierQ ? { on: true, soon: false, rules: true, reason: 'Race after qualifying, so the car is in parc fermé.' } : { on: false, soon: false, rules: true, reason: null };
+    if (isQ(t)) {
+      if (earlierQ) return { on: true, soon: false, rules: true, reason: 'Locked since your first qualifying run.' };
+      if (this.leftGarage) return { on: true, soon: false, rules: true, reason: 'You have run in qualifying, so the car is in parc fermé.' };
+      return { on: false, soon: true, rules: true, reason: 'Parc fermé starts when you leave the garage. Make setup changes now.' };
+    }
+    return { on: false, soon: false, rules: true, reason: null };
+  }
+
   // What's in use right now, straight from the game: session, tyre and the setup on the car.
   inUse() {
     const s = this.session;
@@ -416,6 +442,7 @@ class F1Race {
       trackTemp: s.trackTemp ?? null,
       compound: { 16: 'soft', 17: 'medium', 18: 'hard', 7: 'inter', 8: 'wet' }[st.visual] || null,
       tyreAge: st.tyreAge ?? null,
+      parcFerme: this.parcFerme(),
       setup,
     };
   }

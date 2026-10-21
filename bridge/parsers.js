@@ -135,6 +135,12 @@ function parseF1(b) {
         out.pitLatestLap = b.readUInt8(683);
         out.pitRejoinPosition = b.readUInt8(684);
         out.timeOfDay = b.readUInt32LE(696); // minutes since midnight
+        out.raceStarts = b.readUInt8(713); // 0 manual, 1 assisted
+        out.parcFermeRules = b.readUInt8(723) === 1; // the game's "Parc fermé rules" option
+        out.formationLap = b.readUInt8(727) === 1;
+        const ns = Math.min(b.readUInt8(732), 12);
+        out.weekend = [];
+        for (let k = 0; k < ns; k++) out.weekend.push(b.readUInt8(733 + k)); // session types in weekend order
         out.sector2Start = b.readFloatLE(745);
         out.sector3Start = b.readFloatLE(749);
       }

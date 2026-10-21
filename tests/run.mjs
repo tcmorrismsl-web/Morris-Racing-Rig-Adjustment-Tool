@@ -6,6 +6,7 @@ import { forzaTune, forzaFix, compareValue, estimateRace, COMPOUNDS, START_TIMES
 import { f1Setup, f1Fix, lapsFor, F1_COMPOUNDS, F1_DISTANCES, F1_ISSUES, F1_ROWS, F1_STYLES } from '../js/f1.js';
 import { classFromPi, normalizeCar, upsertCar, diffCar, hasPart, PARTS } from '../js/garage.js';
 import { FORZA_CARS, FORZA_DIVISIONS, findCar, searchCars } from '../js/cars.js';
+import { pfSplit, pfState, PF_DRIVING } from '../js/parcferme.js';
 
 let n = 0;
 const bad = (s) => /NaN|undefined|null|Infinity/.test(s);
@@ -164,4 +165,17 @@ const t2 = forzaTune({ track: 'sebring', cls: 'X', drivetrain: 'awd', weather: '
 assert.ok(t2.sections.every((s) => !s.locked));
 assert.ok(t2.notes.some((n) => n.includes('Add a PI')));
 
-console.log(`OK: ${n} combinations checked, garage checks passed`);
+// Parc fermé: every F1 fix sorts into allowed / locked, and every issue has something you can still do.
+for (const i of F1_ISSUES) {
+  const sp = pfSplit(f1Fix(i.id));
+  assert.equal(sp.ok.length + sp.locked.length, f1Fix(i.id).length);
+  assert.ok(sp.ok.length || PF_DRIVING[i.id], `parc fermé fallback for ${i.id}`);
+  assert.ok(sp.ok.every((x) => /front wing|brake bias|diff on throttle|short-shift|smoother|brake/i.test(x.text)), JSON.stringify(sp.ok));
+}
+assert.deepEqual(pfSplit(['Add 2 front wing.', 'Soften the front anti-roll bar by 2.', 'Lower diff on throttle by 5%.']).locked, ['Soften the front anti-roll bar by 2.']);
+assert.equal(pfState('auto', { on: true, reason: 'x' }).on, true);
+assert.equal(pfState('off', { on: true }).on, false);
+assert.equal(pfState('on', null).on, true);
+assert.equal(pfState('auto', null).on, false);
+
+console.log(`OK: ${n} combinations checked, garage and parc fermé checks passed`);

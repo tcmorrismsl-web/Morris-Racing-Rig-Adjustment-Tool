@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="dash.css?v=mvhjp0ub">
+  <link rel="stylesheet" href="dash.css?v=mvhlfowh">
 </head>
 <body data-game="f1">
   <header class="bar">
@@ -61,9 +61,15 @@
         <button type="button" class="ask" data-ask="time">Losing time</button>
         <button type="button" class="ask" data-ask="weather">Weather</button>
         <button type="button" class="ask" data-ask="tyres">Tyres &amp; fuel</button>
+        <button type="button" class="ask wait" data-ask="wait">I'll wait</button>
+        <button type="button" class="ask" data-ask="plan">Plan</button>
         <button type="button" class="ask" data-ask="repeat">Repeat</button>
         <button type="button" class="ask mic" id="eng-mic" hidden>Talk</button>
       </div>
+      <form class="eng-talk" id="eng-talk" autocomplete="off">
+        <input type="text" id="eng-text" maxlength="300" enterkeyhint="send" autocapitalize="sentences" placeholder="Talk to her… tap the keyboard mic to speak" aria-label="Talk to your engineer">
+        <button type="submit" class="ask send">Send</button>
+      </form>
     </section>
   </main>
 
@@ -91,9 +97,8 @@
       <label class="fld check"><input type="checkbox" id="set-radio"> <span>Radio click before each call</span></label>
       <p class="small" id="device-tip">Smoothest device voices: on a laptop, Microsoft Edge's "Natural" voices (Ava, Emma, Jenny). On iPhone, download an Enhanced or Premium English voice in Settings, Accessibility, Spoken Content, Voices, then pick it here if it's listed.</p>
       <div class="dlg-actions"><button type="button" class="mini" id="set-test">Test voice</button></div>
-      <h3>Answer from your wheel (F1 25)</h3>
-      <p class="small">In F1 25's controls settings, bind these <b>UDP Action</b> controls to spare buttons on your wheel. Presses come through the telemetry, so you never touch the phone.</p>
-      <ul class="map-list" id="udp-list"></ul>
+      <h3>Talking to her</h3>
+      <p class="small">Type in the box under the buttons, or tap the microphone on your phone's keyboard and just speak. "Gaps", "box?", "I'll wait", "where am I losing time" and "what's the plan" get answers from the game's data. Anything else is a conversation: with your OpenAI key she answers in character, warmer the better you drive and the more you flirt, and she'll brush you off when you should be driving. Without a key she has a few set replies.</p>
       <p class="small" id="mic-note"></p>
       <h3>Radio log</h3>
       <ol class="radio-log" id="radio-log"></ol>
@@ -108,6 +113,6 @@
     <a class="btn" href="./">Back to the app</a>
   </div>
 
-  <script type="module" src="js/dash.js?v=mvhjp0ub"></script>
+  <script type="module" src="js/dash.js?v=mvhlfowh"></script>
 </body>
 </html>

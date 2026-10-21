@@ -19,4 +19,9 @@ saves your laps to the MorrisRacing folder in your user folder, and serves the
 app to your phone. The code is in the "bridge" folder (bridge.js, parsers.js,
 laps.js) if you want to read it.
 
+Updates: the bridge keeps itself up to date. It checks the app's website every
+30 minutes and downloads new app files and new bridge code. Bridge code switches
+over by itself the next time you are not driving (it restarts in a second), so
+you shouldn't need to download this folder again.
+
 If something goes wrong, the window stays open with a message. Send a photo of it.

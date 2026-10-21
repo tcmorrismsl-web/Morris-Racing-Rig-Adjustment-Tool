@@ -1,7 +1,17 @@
 {
-  "version": "mvhjp0ub",
-  "label": "Oct 20, 11:21 PM",
-  "bridgeMin": "1.3.0",
+  "version": "mvhlfowh",
+  "label": "Oct 21, 12:09 AM",
+  "bridgeMin": "1.4.0",
+  "bridge": {
+    "version": "1.4.0",
+    "files": [
+      "bridge/bridge.js",
+      "bridge/parsers.js",
+      "bridge/laps.js",
+      "bridge/race.js",
+      "bridge/engineer.js"
+    ]
+  },
   "files": [
     "index.html",
     "dash.html",
@@ -12,12 +22,14 @@
     "js/advice.js",
     "js/app.js",
     "js/cars.js",
+    "js/chat.js",
     "js/dash.js",
     "js/data.js",
     "js/f1.js",
     "js/forza.js",
     "js/garage.js",
     "js/live.js",
+    "js/parcferme.js",
     "js/voice.js"
   ]
 }

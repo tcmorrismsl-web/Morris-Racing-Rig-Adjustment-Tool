@@ -3,7 +3,7 @@ title Morris Racing bridge
 cd /d "%~dp0"
 where node >nul 2>nul
 if errorlevel 1 goto nonode
-node "bridge\bridge.js"
+node "bridge\launch.js"
 echo.
 pause
 exit /b 0

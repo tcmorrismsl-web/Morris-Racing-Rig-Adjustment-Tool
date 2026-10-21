@@ -9,6 +9,8 @@
 const SEGMENTS = 20;          // mini-sectors per lap for "where am I losing time"
 const PIT_EXIT_S = 20;        // estimate: garage to pit exit, seconds
 const OUTLAP_FACTOR = 1.35;   // estimate: out lap vs flying lap time
+const CLEAR_S = 3;            // a clean exit: no car within this many seconds of you at pit exit
+const HORIZON_S = 150;        // how far ahead the clean-window list looks
 const KEEP = 30;
 
 const sec = (ms, d = 1) => (ms / 1000).toFixed(d);
@@ -18,17 +20,20 @@ const SC_NAME = ['', 'Safety car', 'Virtual safety car', 'Formation lap'];
 const WEATHER = ['clear', 'light cloud', 'overcast', 'light rain', 'heavy rain', 'a storm'];
 
 // F1 25 button flags: UDP Action 1-12 are bits 20-31. Bind them to wheel buttons in the game.
-const UDP_ACTIONS = { 1: 'yes', 2: 'no', 3: 'gaps', 4: 'pit', 5: 'time', 6: 'weather', 7: 'tyres', 8: 'repeat' };
+const UDP_ACTIONS = { 1: 'yes', 2: 'no', 3: 'gaps', 4: 'pit', 5: 'time', 6: 'weather', 7: 'tyres', 8: 'repeat', 9: 'wait' };
+const TYRE_NAME = { 16: 'Soft', 17: 'Medium', 18: 'Hard', 7: 'Inter', 8: 'Wet' };
 const udpBit = (n) => 2 ** (19 + n);
 
 // Cooldowns run on the game's clock, so pausing the game pauses the engineer too.
 class Calls {
   constructor(clock) { this.clock = clock; this.list = []; this.seq = 0; this.last = {}; this.pending = null; }
-  say(kind, data, text, { priority = 'normal', cooldownS = 0, key = kind, ask = null } = {}) {
+  // ttlS: how long the call stays worth saying. The dashboard drops it if it can't be said in time.
+  say(kind, data, text, { priority = 'normal', cooldownS = 0, key = kind, ask = null, ttlS = null } = {}) {
     const now = this.clock();
     if (cooldownS && this.last[key] && now - this.last[key] < cooldownS * 1000) return null;
     this.last[key] = now;
     const call = { id: ++this.seq, at: Date.now(), t: now, kind, priority, data, text };
+    if (ttlS) call.ttlS = ttlS;
     if (ask) { call.ask = ask; this.pending = { id: call.id, ask, kind, data, at: now }; }
     this.list.push(call);
     if (this.list.length > KEEP) this.list.shift();
@@ -91,7 +96,8 @@ class F1Engineer {
     this.lastLoss = null; this.segLoss = null;
     this.button = 0;
     this.started = false;
-    this.leave = null; this.leaveSaidAt = 0; this.leaveState = null;
+    this.leave = null; this.garage = null;
+    this.briefed = false; this.formationSaid = false; this.lightsOut = false; this.raceSeen = 0; this.pfSaid = false;
     this.wearBucket = 0;
     this.boxPlan = null;
     this.flagAt = {};
@@ -117,6 +123,7 @@ class F1Engineer {
     const s = this.race.session;
     if (!this.started && s.sessionType) {
       this.started = true;
+      if (this.isRace) return; // races open with the pre-race briefing instead (see raceStart)
       const type = this.isRace ? 'race' : this.isQuali ? 'qualifying' : s.sessionType === 18 ? 'time trial' : 'practice';
       this.calls.say('session', { type, laps: this.isRace ? s.totalLaps : null, weather: WEATHER[s.weather], trackTemp: s.trackTemp },
         `Radio check. ${type[0].toUpperCase()}${type.slice(1)}${this.isRace && s.totalLaps ? `, ${s.totalLaps} laps` : ''}. ${WEATHER[s.weather] ? `It's ${WEATHER[s.weather]}, track ${s.trackTemp}°C.` : ''}`, { priority: 'normal' });
@@ -131,7 +138,8 @@ class F1Engineer {
     const next = (m.forecast || []).filter((f) => f.sessionType === s.sessionType && f.minutes > 0 && f.minutes <= 15).sort((a, b) => a.minutes - b.minutes);
     const rain = next.find((f) => f.rain >= 40 || f.weather >= 3);
     const key = rain ? `${Math.round(rain.rain / 20)}-${rain.minutes <= 5 ? 'near' : 'far'}` : 'none';
-    if (rain && key !== this.rainKey) {
+    // Before a race start the briefing covers the rain, so no separate call.
+    if (rain && key !== this.rainKey && !(this.isRace && !this.briefed)) {
       const onSlicks = [16, 17, 18].includes(this.race.status[this.me]?.visual);
       const askInters = this.isRace && onSlicks && rain.minutes <= 5 && rain.weather >= 3;
       this.calls.say('rain-coming', { minutes: rain.minutes, rain: rain.rain, heavy: rain.weather >= 4 },
@@ -139,7 +147,8 @@ class F1Engineer {
         { priority: 'high', cooldownS: 60, ask: askInters ? 'box-inters' : null });
     }
     if (!rain && this.rainKey && this.rainKey !== 'none') this.calls.say('rain-clear', {}, 'Rain risk has dropped off the forecast.', { priority: 'low', cooldownS: 120 });
-    this.rainKey = key;
+    this.rainNow = key;
+    if (!(this.isRace && !this.briefed)) this.rainKey = key;
   }
 
   onLap() {
@@ -166,7 +175,7 @@ class F1Engineer {
     if (this.lastLapNum !== null && c.lapNum === this.lastLapNum + 1) this.lapDone(c);
     this.lastLapNum = c.lapNum;
 
-    if (this.isRace) this.raceCalls(c);
+    if (this.isRace) { this.raceStart(c); this.raceCalls(c); }
     else if (this.isQuali || r.session.sessionType <= 4) this.qualiCalls(c);
     this.carCalls();
   }
@@ -187,6 +196,11 @@ class F1Engineer {
       const pressed = m.buttons & ~this.button;
       this.button = m.buttons;
       for (const [n, topic] of Object.entries(UDP_ACTIONS)) if (pressed & udpBit(Number(n))) this.ask(topic);
+      return;
+    }
+    if (m.code === 'LGOT' && this.isRace && !this.lightsOut) {
+      this.lightsOut = true;
+      this.calls.say('lights', {}, 'Lights out! Go, go, go. Clean through turn one.', { priority: 'high', ttlS: 4 });
       return;
     }
     if (m.code === 'SCAR') {
@@ -335,49 +349,178 @@ class F1Engineer {
   }
 
   // ---------------- qualifying and practice: when to leave the garage ----------------
+  // In the garage she reads the traffic at pit exit and keeps a list of clean windows plus the
+  // latest you can leave for one more flying lap (both on the dashboard). On the radio she says
+  // what the traffic is doing once, calls the gap once and asks if you're going. Say "wait"
+  // (or no) and she stays quiet until you ask. Once you're out of the garage, no more pit-exit calls.
   qualiCalls(c) {
     const r = this.race;
     const s = r.session;
     const len = s.trackLength;
-    if (c.driverStatus !== 0) { this.leaveState = null; return; } // only while sitting in the garage
     const now = this.now();
+    const moving = (r.tel?.speedKmh || 0) > 10;
+    if (c.driverStatus !== 0 || moving) {
+      if (!this.leave?.out) {
+        this.leave = { out: true };
+        this.garage = null;
+        if (this.calls.pending?.ask === 'leave') this.calls.pending = null;
+      }
+      return;
+    }
+    if (!this.garage) this.garage = { since: now, said: null, muted: false, warned: {} };
+    const g = this.garage;
+    // Parc fermé starts the moment you drive out in qualifying: one reminder while changes are still possible.
+    const pf = r.parcFerme();
+    if (pf.soon && !this.pfSaid && now - g.since > 1500) {
+      this.pfSaid = true;
+      this.calls.say('parc-ferme', { soon: true }, "Heads up: parc fermé starts when you leave the garage. Any setup changes, make them now. After that it's front wing only.", { priority: 'normal' });
+    }
     if (now - (this.leaveCalcAt || 0) < 1000) return;
     this.leaveCalcAt = now;
     const pitExit = this.pitExits.length ? [...this.pitExits].sort((a, b) => a - b)[Math.floor(this.pitExits.length / 2)] : len * 0.06;
     const myBest = this.myBestMs || r.history[this.me]?.bestLapMs || 0;
     const fieldBest = Object.values(r.history).map((h) => h.bestLapMs).filter((v) => v > 0).sort((a, b) => a - b)[0] || 0;
     const lapS = (myBest || fieldBest || len / 52 * 1000) / 1000;
-    // When will each car on track pass the pit exit?
+    // When will each car on track pass the pit exit (this lap and the next two)?
     const arrivals = [];
     r.lap.forEach((o, i) => {
-      if (i === this.me || !o || o.resultStatus !== 2 || o.pitStatus !== 0 || ![1, 3, 4].includes(o.driverStatus) || !(o.lapDistance >= 0)) return;
+      if (i === this.me || !o || o.resultStatus !== 2 || o.pitStatus !== 0 || ![1, 2, 3, 4].includes(o.driverStatus) || !(o.lapDistance >= 0)) return;
       const v = (len / lapS) * (o.driverStatus === 3 ? 0.75 : 1); // out laps are slower
       const d = (pitExit - o.lapDistance + len) % len;
-      arrivals.push({ t: d / v, i, flying: o.driverStatus === 1 });
+      for (let k = 0; k < 3; k++) arrivals.push({ t: (d + k * len) / v, i, flying: o.driverStatus === 1 && k === 0, inLap: o.driverStatus === 2 });
     });
-    // Earliest moment you'd reach pit exit with no car within 3 s either side.
-    let wait = null;
-    for (let w = 0; w <= 90; w++) {
+    // Clean windows: leave-in seconds where you'd reach pit exit with nobody within CLEAR_S.
+    const windows = [];
+    for (let w = 0; w <= HORIZON_S; w++) {
       const at = PIT_EXIT_S + w;
-      if (!arrivals.some((a) => Math.abs(a.t - at) < 3)) { wait = w; break; }
+      const clear = !arrivals.some((a) => !a.inLap && Math.abs(a.t - at) < CLEAR_S);
+      const open = windows[windows.length - 1];
+      if (clear) { if (open && open.to === w - 1) open.to = w; else windows.push({ from: w, to: w }); }
     }
-    const blocker = wait ? arrivals.filter((a) => Math.abs(a.t - PIT_EXIT_S) < 3).sort((a, b) => a.t - b.t)[0] : null;
-    // Latest time to leave and still start a final flying lap.
+    // Only gaps of 3 s or more are worth calling: easy to hit when you leave.
+    const good = windows.filter((x) => x.to - x.from >= 2);
+    const wait = good.length ? good[0].from : null;
+    const blocker = wait ? arrivals.filter((a) => Math.abs(a.t - PIT_EXIT_S) < CLEAR_S).sort((a, b) => a.t - b.t)[0] : null;
+    // Latest time to leave and still start a final flying lap before the clock runs out.
     const need = PIT_EXIT_S + lapS * OUTLAP_FACTOR * (1 - pitExit / len) + 5;
     const timeLeft = s.timeLeft ?? null;
-    this.leave = { waitS: wait, blocker: blocker ? this.name(blocker.i) : null, blockerFlying: blocker?.flying || false, leaveByS: timeLeft !== null ? Math.round(timeLeft - need) : null, cars: arrivals.length };
+    const leaveByS = timeLeft !== null ? Math.round(timeLeft - need) : null;
+    const clearForS = wait !== null && wait <= 2 ? good[0].to - wait + 1 : null;
+    this.leave = {
+      out: false, waitS: wait, clearForS, windows: good.slice(0, 4), cars: new Set(arrivals.map((a) => a.i)).size,
+      blocker: blocker ? this.name(blocker.i) : null, blockerFlying: blocker?.flying || false,
+      leaveByS, leaveAtClockS: leaveByS !== null ? Math.max(0, Math.round(need)) : null, muted: g.muted,
+    };
+    if (now - g.since < 3000) return; // settle first
 
-    if (timeLeft !== null && this.leave.leaveByS !== null && this.leave.leaveByS <= 90 && this.leave.leaveByS > 0) {
-      this.calls.say('leave-by', { seconds: this.leave.leaveByS }, `${this.leave.leaveByS} seconds to leave the garage if you want one more lap.`, { priority: 'high', cooldownS: 30 });
+    // The deadline matters even when she's been told to wait: once at 90 s and once at 30 s.
+    for (const th of [90, 30]) {
+      if (leaveByS !== null && leaveByS <= th && leaveByS > 0 && !g.warned[th]) {
+        g.warned[90] = true; if (th === 30) g.warned[30] = true;
+        this.calls.say('leave-by', { seconds: leaveByS }, `${leaveByS} seconds left to leave the garage for one more lap.`, { priority: 'high', key: `leave-by-${th}`, ttlS: 8 });
+      }
     }
-    const state = wait === null ? 'busy' : wait <= 2 ? 'go' : 'wait';
-    // Once told to go, give the driver 12 s to leave before changing the call; short waits aren't worth a call.
-    const holdGo = this.leaveState === 'go' && now - this.leaveSaidAt < 12000;
-    if (!holdGo && !(state === 'wait' && wait < 6) && (state !== this.leaveState || now - this.leaveSaidAt > 30000)) {
-      this.leaveState = state; this.leaveSaidAt = now;
-      if (state === 'go') this.calls.say('leave-go', { cars: arrivals.length }, arrivals.length ? 'Gap in the traffic at pit exit. Go now, go now.' : 'Track is clear. You can go whenever you like.', { priority: 'high', cooldownS: 10 });
-      else if (state === 'wait') this.calls.say('leave-wait', { seconds: wait, blocker: this.leave.blocker, flying: this.leave.blockerFlying }, `Hold for about ${wait} seconds${this.leave.blocker ? `, ${this.leave.blocker} is coming through${this.leave.blockerFlying ? ' on a flying lap' : ''}` : ''}. I'll tell you when.`, { priority: 'normal', cooldownS: 10 });
+    if (g.muted) return;
+    const go = () => {
+      g.said = 'go';
+      const cars = this.leave.cars;
+      this.calls.say('leave-go', { cars, clearForS }, cars ? `Gap at pit exit now${clearForS ? `, clean for about ${Math.min(clearForS, 60)} seconds` : ''}. Are you going?` : 'Track is clear. Go whenever you like.', { priority: 'high', ask: cars ? 'leave' : null, ttlS: 6 });
+    };
+    if (!g.said) {
+      if (wait !== null && wait <= 2) go();
+      else if (wait === null) { g.said = 'busy'; this.calls.say('leave-wait', { seconds: null }, "Pit exit is busy for the next couple of minutes. Sit tight, I'm watching it.", { priority: 'normal', ttlS: 10 }); }
+      else if (wait >= 6) {
+        g.said = 'wait';
+        this.calls.say('leave-wait', { seconds: wait, blocker: this.leave.blocker, flying: this.leave.blockerFlying }, `Traffic at pit exit${this.leave.blocker ? `, ${this.leave.blocker} is coming through${this.leave.blockerFlying ? ' on a flying lap' : ''}` : ''}. Next clean gap in about ${wait} seconds. I'll call it.`, { priority: 'normal', ttlS: 10 });
+      }
+    } else if (g.said !== 'go' && wait !== null && wait <= 2) go(); // the gap she promised
+    // After the go call: quiet, unless you ask.
+  }
+
+  // Wait / hold in the garage: stop the pit-exit calls until asked again.
+  holdInGarage(reason) {
+    if (this.garage) { this.garage.muted = true; if (this.leave) this.leave.muted = true; }
+    const l = this.leave;
+    const by = l && !l.out && l.leaveByS !== null && l.leaveByS > 0 ? ` Leave within ${fmtClock(l.leaveByS)} for a final lap.` : '';
+    return this.calls.say('answer', { topic: 'wait', reason }, `Copy. Holding in the garage, I'll stay quiet.${by} Ask me for a gap when you're ready.`, { priority: 'high', key: `ans-${this.now()}` });
+  }
+
+  // ---------------- before the start: briefing, formation lap, lights out ----------------
+  raceStart(c) {
+    const r = this.race;
+    const s = r.session;
+    const now = this.now();
+    if (!this.raceSeen) this.raceSeen = now || 1;
+    const speed = r.tel?.speedKmh || 0;
+    if (!this.lightsOut && c.lapNum === 1 && speed > 80 && s.safetyCar !== 3 && this.briefed) this.lightsOut = true; // no LGOT event seen
+    const onGrid = !this.lightsOut && c.lapNum === 1 && (speed < 5 || s.safetyCar === 3);
+    if (!this.briefed && onGrid && c.position && r.status[this.me]?.visual && now - this.raceSeen > 1500) {
+      this.briefed = true;
+      const p = this.plan();
+      this.calls.say('briefing', p, p.say, { priority: 'high' });
+      this.rainKey = this.rainNow ?? null; // the briefing covered the forecast
     }
+    if (!this.briefed && !onGrid) { // joined mid-race: a plain radio check instead of the briefing
+      this.briefed = true;
+      this.calls.say('session', { type: 'race', laps: s.totalLaps, weather: WEATHER[s.weather], trackTemp: s.trackTemp }, `Radio check. Race, ${s.totalLaps ? `${s.totalLaps} laps, ` : ''}you're P${c.position}.`, { priority: 'normal' });
+    }
+    if (!this.formationSaid && s.safetyCar === 3 && c.lapNum === 1 && !this.lightsOut) {
+      this.formationSaid = true;
+      const assisted = s.raceStarts === 1;
+      this.calls.say('formation', { assisted }, `Formation lap. Weave to put heat in the fronts, a few hard bursts of throttle out of the slow corners for the rears, and one firm stop before the last corner for the brakes. Stay within ten car lengths of the car ahead. ${assisted ? 'On the grid, just hold full throttle at lights out and the game does the clutch.' : 'On the grid: clutch in, revs up, release at lights out and short-shift into second.'}`, { priority: 'high' });
+    }
+  }
+
+  // Race notes: the plan for the race, from the game's own data. Spoken in the briefing and shown on the dashboard.
+  plan() {
+    const r = this.race;
+    const s = r.session;
+    const me = this.me;
+    const c = r.lap[me] || {};
+    const st = r.status[me] || {};
+    const items = [];
+    const say = [];
+    const grid = c.grid || c.position;
+    const field = r.lap.filter((x) => x && x.position && x.resultStatus >= 2).length;
+    const tyre = TYRE_NAME[st.visual];
+    if (grid) items.push({ k: 'Start', v: `P${grid}${field ? ` of ${field}` : ''}${s.totalLaps ? ` · ${s.totalLaps} laps` : ''}` });
+    if (tyre) items.push({ k: 'Tyres', v: `${tyre}${st.tyreAge ? `, ${st.tyreAge} laps old` : ', new'}` });
+    say.push(`Race briefing. You start P${grid}${tyre ? ` on ${tyre}s` : ''}${s.totalLaps ? `, ${s.totalLaps} laps` : ''}.`);
+    const set = this.bestSet();
+    if (s.pitIdealLap > 0) {
+      const v = `Box around lap ${s.pitIdealLap}${s.pitLatestLap && s.pitLatestLap !== s.pitIdealLap ? `, no later than lap ${s.pitLatestLap}` : ''}${set ? `, onto ${set.name}s` : ''}`;
+      items.push({ k: 'Stop', v });
+      say.push(`Plan is one stop: ${v.replace(/^Box/, 'box')}.`);
+    } else if (s.totalLaps && s.totalLaps > 5) {
+      items.push({ k: 'Stop', v: 'No stop in the game\'s plan' });
+      say.push('No stop planned, so look after the tyres.');
+    } else {
+      items.push({ k: 'Stop', v: 'Flat out, no stop' });
+      say.push('Short race, no stop. Flat out.');
+    }
+    if (Number.isFinite(st.fuelLaps)) {
+      const f = st.fuelLaps;
+      items.push({ k: 'Fuel', v: `${f >= 0 ? '+' : ''}${f.toFixed(1)} laps${f < 0 ? ', save from the start' : f < 0.3 ? ', a little lift and coast late' : ''}` });
+      if (f < 0) say.push(`Fuel is ${Math.abs(f).toFixed(1)} laps short, so lift and coast from the start.`);
+      else if (f < 0.3) say.push('Fuel is tight, a little lift and coast later on.');
+    }
+    const rainMax = Math.max(0, ...(s.forecast || []).filter((x) => x.sessionType === s.sessionType).map((x) => x.rain));
+    if (s.weather !== undefined) {
+      const w = `${WEATHER[s.weather] || 'unknown'}, track ${s.trackTemp}°C${rainMax >= 30 ? `, rain up to ${rainMax}% later` : ', no rain expected'}`;
+      items.push({ k: 'Weather', v: w[0].toUpperCase() + w.slice(1) });
+      say.push(`It's ${w}.`);
+    }
+    const near = (pos) => r.lap.findIndex((x) => x && (x.grid || x.position) === pos);
+    const ahead = grid > 1 ? near(grid - 1) : -1, behind = near(grid + 1);
+    if (ahead >= 0 || behind >= 0) {
+      items.push({ k: 'Around you', v: [ahead >= 0 ? `${this.name(ahead)} ahead` : '', behind >= 0 ? `${this.name(behind)} behind` : ''].filter(Boolean).join(', ') });
+      say.push(`${ahead >= 0 ? `${this.name(ahead)} starts ahead of you` : ''}${ahead >= 0 && behind >= 0 ? ', ' : ''}${behind >= 0 ? `${this.name(behind)} behind` : ''}.`);
+    }
+    const pf = r.parcFerme();
+    if (pf.on) items.push({ k: 'Parc fermé', v: 'Front wing only at the stop. Bias and diff from the wheel.' });
+    items.push({ k: 'Turn 1', v: 'Clean start, no heroes. The race is long.' });
+    say.push('Clean start, no heroes into turn one.');
+    return { title: 'Race plan', items, say: say.join(' ') };
   }
 
   // ---------------- car state: flags, fuel, tyres, wheel changes ----------------
@@ -420,6 +563,11 @@ class F1Engineer {
       if (!pend || this.now() - pend.at > 120000) return this.calls.say('answer', { topic }, "Copy. Nothing's waiting on an answer.", { priority: 'high', key: `ans-${this.now()}` });
       this.calls.pending = null;
       const yes = topic === 'yes';
+      if (pend.ask === 'leave') {
+        if (!yes) return this.holdInGarage('no');
+        if (this.garage) this.garage.muted = true;
+        return this.calls.say('answer', { topic, ask: pend.ask, yes }, 'Copy. Out you go, build the tyres on the out lap and go for it.', { priority: 'high', key: `ans-${this.now()}` });
+      }
       if (pend.ask === 'box-inters') {
         if (yes) this.boxPlan = { lap: c.lapNum + 1, tyre: 'Inter' };
         return this.calls.say('answer', { topic, ask: pend.ask, yes }, yes ? "Copy, we'll box for Inters at the end of this lap. I'll call it." : "Copy, staying out on slicks. I'll keep watching the rain.", { priority: 'high', key: `ans-${this.now()}` });
@@ -432,6 +580,15 @@ class F1Engineer {
       return null;
     }
     if (topic === 'repeat') return this.calls.repeat();
+    if (topic === 'wait') {
+      if (pend && this.now() - pend.at < 120000) return this.ask('no');
+      if (!this.isRace && this.leave && !this.leave.out) return this.holdInGarage('wait');
+      return this.calls.say('answer', { topic }, 'Copy.', { priority: 'high', key: `ans-${this.now()}` });
+    }
+    if (topic === 'plan') {
+      const p = this.isRace ? this.plan() : null;
+      return this.calls.say('answer', { topic }, p ? p.say.replace(/^Race briefing\.\s*/, '') : 'Plan for this session: find a clean gap, build the tyres on the out lap, then two good pushes.', { priority: 'high', key: `ans-${this.now()}` });
+    }
     if (topic === 'gaps') {
       if (this.isRace && c.position) {
         const aheadIdx = r.lap.findIndex((x) => x && x.position === c.position - 1);
@@ -448,8 +605,10 @@ class F1Engineer {
     if (topic === 'pit') {
       if (!this.isRace) {
         const l = this.leave;
-        const text = c.driverStatus !== 0 ? 'You\'re out on track. Ask me again from the garage and I\'ll find you a gap.' : !l ? 'Give me a second to read the traffic.' : l.waitS !== null && l.waitS <= 2 ? 'Gap at pit exit right now. Go.' : l.waitS === null ? 'Pit exit is busy for the next minute and a half. Sit tight.' : `Leave in about ${l.waitS} seconds for clean air.`;
-        return this.calls.say('answer', { topic, leave: l }, `${text}${l?.leaveByS !== null && l?.leaveByS !== undefined && l.leaveByS < 300 ? ` You need to leave within ${Math.max(0, l.leaveByS)} seconds for a final lap.` : ''}`, { priority: 'high', key: `ans-${this.now()}` });
+        // Asking again turns the pit-exit calls back on: she'll call the next gap once.
+        if (this.garage) { this.garage.muted = false; this.garage.said = l && l.waitS !== null && l.waitS <= 2 ? 'go' : 'wait'; }
+        const text = !l || l.out ? 'You\'re out on track. Ask me again from the garage and I\'ll find you a gap.' : l.waitS !== null && l.waitS <= 2 ? `Gap at pit exit right now${l.clearForS ? `, clean for about ${Math.min(l.clearForS, 60)} seconds` : ''}. Go.` : l.waitS === null ? 'Pit exit is busy for the next couple of minutes. Sit tight.' : `Next clean gap in about ${l.waitS} seconds. I'll call it.`;
+        return this.calls.say('answer', { topic, leave: l }, `${text}${l && !l.out && l.leaveByS !== null && l.leaveByS < 300 ? ` You need to leave within ${fmtClock(Math.max(0, l.leaveByS))} for a final lap.` : ''}`, { priority: 'high', key: `ans-${this.now()}` });
       }
       const set = this.bestSet();
       const text = (c.pitStops || 0) > 0 && !s.pitIdealLap ? `You've stopped${set ? `; if we need another, ${set.name}s are best` : ''}.`
@@ -478,8 +637,15 @@ class F1Engineer {
 
   state() {
     const p = this.calls.pending;
-    return { calls: this.calls.list.slice(-15), pending: p && this.now() - p.at < 120000 ? { id: p.id, ask: p.ask } : null, segLoss: this.segLoss, segments: SEGMENTS, leave: this.leave, buttons: UDP_ACTIONS };
+    const showPlan = this.isRace && !this.lightsOut && this.race.lap[this.me]?.lapNum === 1;
+    return { calls: this.calls.list.slice(-15), pending: p && this.now() - p.at < 120000 ? { id: p.id, ask: p.ask } : null, segLoss: this.segLoss, segments: SEGMENTS, leave: this.isRace ? null : this.leave, plan: showPlan ? this.plan() : null, phase: this.isRace ? (this.lightsOut ? 'race' : this.race.session.safetyCar === 3 ? 'formation' : 'grid') : this.leave?.out === false ? 'garage' : 'track' };
   }
+}
+
+// 95 -> "1 minute 35", 40 -> "40 seconds"
+function fmtClock(sec) {
+  const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+  return m ? `${m} minute${m === 1 ? '' : 's'}${s ? ` ${s}` : ''}` : `${s} seconds`;
 }
 
 function splitsText(d) {
@@ -503,7 +669,11 @@ class ForzaEngineer {
   reset() { this.calls = new Calls(() => this.now()); this.lastPos = null; this.posSince = 0; this.prevPos = null; this.lastLoss = null; this.segLoss = null; this.fuelSaid = false; this.wearBucket = 0; this.finalSaid = false; this.started = false; }
 
   onPacket(p) {
-    if (!this.started && p.isRaceOn) { this.started = true; this.calls.say('session', {}, "Radio check. I can hear you. Forza only sends me your car, so I'll keep you posted on your laps, fuel and tyres.", { priority: 'normal' }); }
+    if (!this.started && p.isRaceOn) {
+      this.started = true;
+      const laps = Number(this.race.getLaps()) || null;
+      this.calls.say('session', { laps }, `Radio check. I can hear you.${laps ? ` ${laps} laps today.` : ''} Clean first lap, then build. Forza only sends me your car, so I'll keep you posted on your laps, fuel and tyres.`, { priority: 'normal' });
+    }
     const now = this.now();
     if (p.isRaceOn && p.position) {
       if (p.position !== this.prevPos) { this.prevPos = p.position; this.posSince = now; }
@@ -545,7 +715,8 @@ class ForzaEngineer {
     const s = this.race.state();
     const key = `ans-${this.now()}`;
     if (topic === 'repeat') return this.calls.repeat();
-    if (topic === 'yes' || topic === 'no') return this.calls.say('answer', { topic }, 'Copy.', { priority: 'high', key });
+    if (topic === 'yes' || topic === 'no' || topic === 'wait') return this.calls.say('answer', { topic }, 'Copy.', { priority: 'high', key });
+    if (topic === 'plan') { const laps = Number(this.race.getLaps()) || null; return this.calls.say('answer', { topic }, `${laps ? `${laps} laps. ` : ''}Clean first lap, then build. I'll call fuel and tyres as we go.`, { priority: 'high', key }); }
     if (topic === 'gaps') return this.calls.say('answer', { topic }, `P${s.session?.position ?? '–'}. Forza doesn't send me the other cars, so no gaps, sorry.`, { priority: 'high', key });
     if (topic === 'pit' || topic === 'tyres') {
       const items = (s.pit?.items || []).map((i) => i.title).join('. ');
@@ -559,7 +730,7 @@ class ForzaEngineer {
     return null;
   }
 
-  state() { return { calls: this.calls.list.slice(-15), pending: null, segLoss: this.segLoss, segments: this.segLoss ? this.segLoss.length : 0, buttons: null }; }
+  state() { return { calls: this.calls.list.slice(-15), pending: null, segLoss: this.segLoss, segments: this.segLoss ? this.segLoss.length : 0, phase: 'race' }; }
 }
 
 module.exports = { F1Engineer, ForzaEngineer, UDP_ACTIONS, SEGMENTS, splitsText };

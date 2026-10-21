@@ -174,3 +174,33 @@ button { font: inherit; color: inherit; }
 .eng-dialog [hidden] { display: none !important; }
 .fld textarea { resize: vertical; line-height: 1.35; }
 .sound-ideas { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 10px; }
+
+/* "I'll wait" only matters in the garage or when she's asked something */
+.ask.wait { display: none; }
+.eng-panel[data-phase="garage"] .ask.wait, .eng-panel.pending .ask.wait { display: inline-block; background: color-mix(in srgb, var(--amber) 20%, var(--panel-2)); border-color: var(--amber); }
+.eng-said.you { color: var(--muted); font-style: italic; }
+
+/* Talk box: type, or use the keyboard's microphone */
+.eng-talk { display: flex; gap: 6px; margin-top: 8px; }
+.eng-talk input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: 16px/1.2 var(--body); }
+.eng-talk input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ask.send { background: color-mix(in srgb, var(--accent) 28%, var(--panel-2)); border-color: var(--accent); }
+
+/* Garage exit: go / wait, clean gaps, latest time to leave */
+.exit { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding: 8px 10px; border-radius: 8px; background: var(--panel-2); border-left: 4px solid var(--line); }
+.exit .big { font: 700 26px/1 var(--cond); letter-spacing: .02em; text-transform: uppercase; }
+.exit span { color: var(--muted); font-size: 14px; }
+.exit.go { border-color: var(--green); } .exit.go .big { color: var(--green); }
+.exit.wait { border-color: var(--amber); } .exit.wait .big { color: var(--amber); }
+.exit.busy { border-color: var(--red); } .exit.busy .big { color: #ffd0cc; }
+.wins { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.win { font: 600 15px/1 var(--cond); padding: 4px 8px; border-radius: 999px; background: color-mix(in srgb, var(--green) 18%, var(--panel-2)); border: 1px solid color-mix(in srgb, var(--green) 50%, transparent); font-variant-numeric: tabular-nums; }
+.leaveby { margin: 6px 0 8px; font-size: 14px; }
+.leaveby b { font: 700 18px/1 var(--cond); color: var(--gold); font-variant-numeric: tabular-nums; }
+.leaveby.late { color: #ffd0cc; }
+
+/* Race plan card before the start */
+.card.plan { margin-bottom: 8px; }
+.card.plan dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 6px 0 0; font-size: 14px; }
+.card.plan dt { color: var(--muted); }
+.card.plan dd { margin: 0; }

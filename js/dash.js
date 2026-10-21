@@ -1,8 +1,10 @@
 // Live race dashboard. Reads the bridge's 10-per-second race stream and draws the
 // track map, timing tower, pit options, adjustments and the race engineer.
 
-import * as voice from './voice.js?v=mvhjp0ub';
-import { lapAdvice } from './advice.js?v=mvhjp0ub';
+import * as voice from './voice.js?v=mvhlfowh';
+import { lapAdvice } from './advice.js?v=mvhlfowh';
+import { talk } from './chat.js?v=mvhlfowh';
+import { pfSplit } from './parcferme.js?v=mvhlfowh';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -25,7 +27,7 @@ function fmtLap(ms) {
   const s = (ms % 60000) / 1000;
   return m ? `${m}:${s.toFixed(3).padStart(6, '0')}` : s.toFixed(3);
 }
-const fmtGap = (ms) => (ms === null || ms === undefined ? '–' : `+${(ms / 1000).toFixed(ms < 10000 ? 3 : 1)}`);
+const fmtGap = (ms) => (ms === null || ms === undefined ? '–' : `${ms < 0 ? '-' : '+'}${(Math.abs(ms) / 1000).toFixed(Math.abs(ms) < 10000 ? 3 : 1)}`);
 const fmtSec = (s) => (s === null || s === undefined ? '–' : fmtLap(s * 1000));
 const clock = (mins) => (mins === null || mins === undefined ? '' : `${Math.floor(mins / 60) % 24}:${String(mins % 60).padStart(2, '0')}`);
 
@@ -189,10 +191,33 @@ function renderForzaTiming(d) {
 
 const card = (x) => `<div class="card ${x.level}"><b>${esc(x.title)}</b>${x.text ? `<p>${esc(x.text)}</p>` : ''}</div>`;
 
+const mmss = (sec) => (sec === null || sec === undefined ? '–' : `${sec < 0 ? '-' : ''}${Math.floor(Math.abs(sec) / 60)}:${String(Math.round(Math.abs(sec) % 60)).padStart(2, '0')}`);
+
+// In the garage (qualifying and practice): when to leave, the clean gaps coming up, and the
+// latest you can leave for one more lap.
+function garageExit(l) {
+  const state = l.waitS === null ? 'busy' : l.waitS <= 2 ? 'go' : 'wait';
+  const head = state === 'go' ? `<b class="big">Go now</b><span>${l.clearForS ? `clear for ${l.clearForS} s` : 'clean air'}</span>`
+    : state === 'wait' ? `<b class="big">Wait ${l.waitS} s</b><span>${l.blocker ? `${esc(l.blocker)} coming through` : 'for the next clean gap'}</span>`
+      : '<b class="big">Pit exit busy</b><span>no clean gap in the next 2½ minutes</span>';
+  const wins = (l.windows || []).map((w) => `<span class="win">${w.from <= 2 ? 'now' : mmss(w.from)}–${mmss(w.to)}</span>`).join('');
+  const by = l.leaveByS === null || l.leaveByS === undefined ? ''
+    : l.leaveByS > 0 ? `<div class="leaveby">Leave within <b>${mmss(l.leaveByS)}</b> for one more lap${l.leaveAtClockS ? ` · before the session clock shows <b>${mmss(l.leaveAtClockS)}</b>` : ''}</div>`
+      : '<div class="leaveby late">Too late to start another flying lap.</div>';
+  return `<div class="exit ${state}">${head}</div>${wins ? `<div class="wins"><span class="small">Clean gaps (leave in):</span>${wins}</div>` : ''}${by}${l.muted ? '<p class="small">Holding: she\'s quiet until you ask for a gap (Pit).</p>' : ''}`;
+}
+
+function renderPlan(p) {
+  return `<div class="card info plan"><b>${esc(p.title)}</b><dl>${p.items.map((x) => `<dt>${esc(x.k)}</dt><dd>${esc(x.v)}</dd>`).join('')}</dl></div>`;
+}
+
 function renderPit(d) {
   const p = d.pit || {};
   const t = p.tyre || {};
   let html = '';
+  const e = d.engineer || {};
+  if (e.leave && e.leave.out === false) html += garageExit(e.leave);
+  if (e.plan) html += renderPlan(e.plan);
   if (d.game === 'f1') {
     $('pit-sub').textContent = d.session.race ? 'From the game\'s strategy data' : '';
     if (t.short) {
@@ -235,9 +260,15 @@ function renderAdjust(d) {
     const pitStop = mode === 'pitlane';
     $('adj-title').textContent = pitStop ? 'At this stop' : d.game === 'forza' ? 'Tune changes' : 'Setup changes';
     $('adj-sub').innerHTML = chip(pitStop ? 'Pit lane' : d.game === 'forza' ? 'Not racing' : 'In the garage');
+    if (d.parcFerme?.on && !pitStop && d.game === 'f1') $('adj-title').textContent = 'What you can still change';
     let items = adv.findings;
+    const pf = d.parcFerme || {};
     // At a race pit stop only the front wing can change, so keep wing changes.
     if (pitStop) items = items.map((f) => ({ ...f, changes: f.changes.filter((c) => /front wing/i.test(c)) })).filter((f) => f.changes.length);
+    // Parc fermé: keep what you can still change (front wing, wheel settings, driving).
+    else if (pf.on) items = items.map((f) => ({ ...f, changes: pfSplit(f.changes).ok.map((x) => `${x.text} (${x.how.toLowerCase()})`) })).filter((f) => f.changes.length);
+    if (pf.on && !pitStop) $('adj-sub').innerHTML = chip('Parc fermé');
+    else if (pf.soon && !pitStop) $('adj-sub').innerHTML = `${chip('In the garage')} ${chip('Parc fermé when you leave')}`;
     if (sessionLaps.laps.length < 2) html = `<p class="empty">${pitStop ? 'Tyres are on the Pit panel.' : 'Drive at least 2 clean laps this session and setup changes appear here.'}</p>`;
     else if (!items.length) html = `<p class="empty">${pitStop ? 'No wing change needed. Fresh tyres and go.' : 'Nothing to change from your laps. The car looks balanced.'}</p>`;
     else html = `<div class="cards">${items.slice(0, 4).map((f) => card({ level: f.severity === 'high' ? 'now' : f.severity === 'medium' ? 'soon' : 'info', title: f.title, text: `${f.changes.join(' ')} ${f.evidence}` })).join('')}</div><p class="small" style="margin-top:6px">From your last ${Math.min(5, sessionLaps.laps.length)} clean laps. Make one change, then run again.</p>`;
@@ -284,16 +315,18 @@ function renderEngineer(d) {
   if (firstEngineer) { voice.catchUp(e.calls.slice(0, -1)); firstEngineer = false; }
   voice.receive(e.calls);
   pending = e.pending;
-  document.querySelector('.eng-panel').classList.toggle('pending', !!pending);
-  if (e.buttons) $('udp-list').innerHTML = Object.entries(e.buttons).map(([n, t]) => `<li><b>UDP Action ${n}</b>: ${{ yes: 'Yes', no: 'No', gaps: 'Gaps', pit: 'Pit plan', time: 'Where am I losing time', weather: 'Weather', tyres: 'Tyres and fuel', repeat: 'Repeat' }[t]}</li>`).join('');
-  else $('udp-list').innerHTML = '<li>Forza doesn\'t send button presses, so use the buttons on this screen.</li>';
+  const panel = document.querySelector('.eng-panel');
+  panel.classList.toggle('pending', !!pending);
+  panel.dataset.phase = e.phase || '';
+  // Out of the garage: anything still queued about leaving is out of date.
+  if (e.leave?.out || e.phase === 'race') voice.drop(/^leave-/);
   drawLoss(e);
 }
 
 voice.onTranscript(() => {
   const t = voice.transcript[0];
   const said = $('eng-said');
-  if (t) { said.textContent = t.text; said.classList.toggle('ask-now', !!t.ask); }
+  if (t) { said.textContent = t.text; said.classList.toggle('ask-now', !!t.ask); said.classList.toggle('you', t.kind === 'you'); }
   $('radio-log').innerHTML = voice.transcript.map((x) => `<li>${esc(x.text)}</li>`).join('');
 });
 
@@ -330,14 +363,25 @@ $('eng-asks').addEventListener('click', (ev) => {
 const mic = $('eng-mic');
 mic.hidden = !voice.canListen;
 $('mic-note').textContent = voice.canListen
-  ? 'You can also tap Talk and say things like "gaps", "box", "where am I losing time", "weather", "yes" or "no".'
-  : 'Talking back needs the dashboard open on the laptop itself (the browser only allows the microphone there). On a phone, use the wheel buttons or tap.';
+  ? 'On this laptop you can also tap Talk and speak.'
+  : 'On a phone, the keyboard\'s own microphone is the way to speak to her: tap the box, tap the mic on the keyboard, talk, then Send.';
 mic.addEventListener('click', () => {
-  voice.listen((cmd, said) => {
-    if (cmd) ask(cmd);
-    else voice.speak(voice.settings.style !== 'straight' ? `Sorry, I didn't catch that. Say it again for me?` : `Didn't catch that.`);
-    $('eng-said').textContent = `You: "${said}"`;
-  }, (st) => mic.classList.toggle('listening', st === 'listening'));
+  voice.unlockAudio();
+  voice.listen((cmd, said) => { talk(said, last, ask).then(showTalk); }, (st) => mic.classList.toggle('listening', st === 'listening'));
+});
+
+// Typing to her, or speaking with the phone keyboard's microphone.
+function showTalk(r) {
+  if (r?.error) $('eng-said').textContent = `${r.error}. She answered with a set reply.`;
+}
+$('eng-talk').addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  const input = $('eng-text');
+  const text = input.value.trim();
+  if (!text) return;
+  voice.unlockAudio();
+  input.value = '';
+  talk(text, last, ask).then(showTalk).catch(() => {});
 });
 
 // Settings
@@ -377,11 +421,12 @@ $('set-okey').addEventListener('change', (e) => {
 });
 $('set-ovoice').addEventListener('change', (e) => { voice.settings.ovoice = e.target.value; voice.saveSettings(); });
 const SOUND_IDEAS = [
-  ['Southern', 'Warm Southern accent, laid-back and sweet, with a little laugh when she teases.'],
-  ['British', 'Polished British accent, cheeky and confident, like a real F1 pit wall.'],
-  ['Hype', 'Very excited and loud, cheers on every overtake, like she is jumping on the pit wall.'],
-  ['Whisper', 'Close to the mic, soft and breathy, like a private message just for him.'],
-  ['Cool', 'Calm and unbothered, a dry sense of humour, never rushed even in a crisis.'],
+  ['Southern', 'A strong, unmistakable Southern American accent, like a woman from rural Georgia: slow drawl, stretched vowels, warm and sweet, a little laugh when she teases.'],
+  ['British', 'A clear British accent, like a woman from London: crisp consonants, cheeky and confident, like a real Formula 1 pit wall.'],
+  ['Australian', 'A broad Australian accent: relaxed, cheeky, upbeat, with a grin in every line.'],
+  ['Hype', 'Very excited and loud, almost shouting with joy on good news, like she is jumping up and down on the pit wall.'],
+  ['Whisper', 'Close to the mic, soft and breathy, almost whispering, like a private message just for him.'],
+  ['Cool', 'Calm and unbothered, dry sense of humour, never rushed even in a crisis.'],
 ];
 $('sound-ideas').innerHTML = SOUND_IDEAS.map(([l]) => `<button type="button" class="mini" data-idea="${esc(l)}">${esc(l)}</button>`).join('') + '<button type="button" class="mini" data-idea="">Clear</button>';
 $('sound-ideas').addEventListener('click', (e) => {
@@ -414,7 +459,7 @@ for (const [id, key, num] of [['set-style', 'style'], ['set-chat', 'chat'], ['se
 }
 $('set-test').addEventListener('click', () => {
   voice.unlockAudio();
-  voice.speak(voice.phrase({ kind: 'splits', priority: 'normal', text: 'P4, 6 to go. NORRIS 1.2 ahead, you took 0.3 off him. RUSSELL 0.9 behind.', data: { ahead: { changeMs: -300 } } }));
+  voice.speak(voice.phrase({ kind: 'splits', priority: 'normal', text: 'P4, 6 to go. NORRIS 1.2 ahead, you took 0.3 off him. RUSSELL 0.9 behind.', data: { ahead: { changeMs: -300 } } }), { priority: 'normal', kind: 'test' });
 });
 
 // ---------------------------------------------------------------------------

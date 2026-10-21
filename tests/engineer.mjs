@@ -83,6 +83,72 @@ function track(race) {
   assert.ok(/P\d/.test(race.eng.ask('gaps').text));
 }
 
+// ---------------- Before the start: briefing, formation lap, lights out, parc fermé ----------------
+{
+  const race = new F1Race(store());
+  const sim = new F1Sim({ format: 2025, totalLaps: 15, gridS: 25, formationS: 12, parcFerme: true, weekend: [1, 2, 3, 5, 6, 7, 15] });
+  const { all, hook } = track(race);
+  let planOnGrid = null, phases = new Set();
+  for (let k = 0; k < 2400; k++) {
+    for (const b of sim.frame(k)) { race.push(parseF1(b)); hook(); }
+    const st = race.state();
+    phases.add(st.engineer.phase);
+    if (k === 200) planOnGrid = st.engineer.plan;
+  }
+  const kinds = all.map((c) => c.kind);
+  assert.ok(!kinds.includes('session'), 'briefing replaces the radio check');
+  const brief = all.find((c) => c.kind === 'briefing');
+  assert.ok(brief && /You start P5 on Softs, 15 laps/.test(brief.text) && /box around lap 8/.test(brief.text), brief?.text);
+  assert.ok(planOnGrid && planOnGrid.items.some((x) => x.k === 'Stop') && planOnGrid.items.some((x) => x.k === 'Parc fermé'), 'race plan on the dashboard');
+  assert.ok(kinds.indexOf('briefing') < kinds.indexOf('formation') && kinds.indexOf('formation') < kinds.indexOf('lights'), `order: ${kinds.slice(0, 6)}`);
+  assert.equal(all.filter((c) => c.kind === 'formation').length, 1);
+  assert.ok(['grid', 'formation', 'race'].every((p) => phases.has(p)), [...phases].join(','));
+  assert.equal(race.state().engineer.plan, null, 'plan card goes away after the start');
+  assert.ok(race.state().parcFerme.on, 'race after qualifying is in parc fermé');
+  assert.ok(/stop/i.test(race.eng.ask('plan').text));
+}
+
+// ---------------- Qualifying: one gap call, quiet once out, quiet when told to wait ----------------
+for (const answer of [null, 'wait']) {
+  const race = new F1Race(store());
+  const sim = new F1Sim({ format: 2025, sessionType: 5, garageUntil: 150, parcFerme: true, weekend: [1, 5, 6, 7, 15] });
+  const { all, hook } = track(race);
+  let answeredAt = null, leaveSeen = null, pfBefore = null;
+  for (let k = 0; k < 6000; k++) {
+    for (const b of sim.frame(k)) { race.push(parseF1(b)); hook(); }
+    const st = race.state();
+    if (k === 1000) { leaveSeen = st.engineer.leave; pfBefore = st.parcFerme; }
+    if (answer && answeredAt === null && all.some((c) => /^leave-(go|wait)$/.test(c.kind))) { answeredAt = all.length; race.eng.ask(answer); }
+  }
+  const leftAt = all.findIndex((c) => c.t > 150000);
+  const inGarage = all.slice(0, leftAt < 0 ? all.length : leftAt);
+  const afterOut = leftAt < 0 ? [] : all.slice(leftAt);
+  assert.ok(leaveSeen && leaveSeen.out === false && Array.isArray(leaveSeen.windows) && leaveSeen.leaveByS > 0, `garage timers: ${JSON.stringify(leaveSeen)}`);
+  assert.ok(leaveSeen.windows.every((w) => w.to >= w.from), 'clean windows');
+  assert.ok(pfBefore.soon && !pfBefore.on, 'parc fermé not yet on in the garage before the first run');
+  assert.ok(inGarage.some((c) => c.kind === 'parc-ferme'), 'parc fermé reminder before leaving');
+  assert.ok(race.state().parcFerme.on, 'parc fermé on after the first run');
+  assert.ok(inGarage.filter((c) => c.kind === 'leave-go').length <= 1, `one go call per garage visit: ${inGarage.map((c) => c.kind)}`);
+  assert.ok(!afterOut.some((c) => /^leave-/.test(c.kind)), `no pit-exit calls once out: ${afterOut.map((c) => c.kind)}`);
+  assert.equal(race.state().engineer.leave.out, true);
+  if (answer) {
+    const after = all.slice(answeredAt, leftAt < 0 ? all.length : leftAt);
+    assert.ok(after.some((c) => c.kind === 'answer' && /Holding/.test(c.text)), 'acknowledges the wait');
+    assert.ok(!after.some((c) => c.kind === 'leave-go' || c.kind === 'leave-wait'), `quiet after "wait": ${after.map((c) => c.kind)}`);
+  }
+}
+
+// Sprint weekends: the Grand Prix qualifying starts open; the sprint and the GP are locked.
+{
+  const pf = (type, weekend) => { const r = new F1Race(store()); r.session = { sessionType: type, parcFermeRules: true, weekend }; return r.parcFerme(); };
+  const sprint = [1, 10, 11, 12, 15, 5, 6, 7, 16];
+  assert.ok(pf(15, sprint).on && pf(16, sprint).on && pf(6, sprint).on, 'sprint, GP and Q2 locked');
+  assert.ok(!pf(5, sprint).on && pf(5, sprint).soon, 'GP Q1 open until you drive out');
+  assert.ok(!pf(15, [15]).on, 'race-only weekend is open');
+  const off = new F1Race(store()); off.session = { sessionType: 15, parcFermeRules: false, weekend: [5, 15] };
+  assert.ok(!off.parcFerme().on, 'rules off in the game');
+}
+
 // ---------------- Forza ----------------
 {
   const race = new ForzaRace(store(), () => 5);
@@ -100,4 +166,4 @@ function track(race) {
   assert.equal(race.state().adjust.mode, 'track');
 }
 
-console.log('OK: engineer checks passed (race, qualifying, Forza)');
+console.log('OK: engineer checks passed (race, briefing, qualifying, parc fermé, Forza)');

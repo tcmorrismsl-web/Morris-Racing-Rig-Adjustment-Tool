@@ -2,7 +2,8 @@
 // Morris Racing bridge.
 // Receives Forza Motorsport and F1 25 telemetry from the Xbox over UDP, turns it into
 // lap summaries, and serves the Morris Racing app to your phone over your Wi-Fi.
-// No dependencies: run with `node bridge/bridge.js`, or the packaged Windows .exe.
+// No dependencies. Started by bridge/launch.js ("Start Morris Racing Bridge"), which also
+// switches to newer bridge code when this downloads it.
 
 const http = require('http');
 const dgram = require('dgram');
@@ -13,15 +14,19 @@ const { parseForza, parseF1, parseF1Header } = require('./parsers');
 const { ForzaLaps, F1Laps } = require('./laps');
 const { F1Race, ForzaRace } = require('./race');
 
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
+const vm = require('vm');
+const Module = require('module');
 const arg = (name, def) => {
   const i = process.argv.indexOf(`--${name}`);
   return i > -1 ? Number(process.argv[i + 1]) : Number(process.env[`MR_${name.toUpperCase()}`]) || def;
 };
 const PORTS = { http: arg('http', 8080), forza: arg('forza', 5300), f1: arg('f1', 20777) };
-const APP_ROOT = path.join(__dirname, '..');
-// The app and dashboard files update themselves from the app's website, so most changes
-// don't need a new bridge download. Bridge code itself never changes this way.
+const APP_ROOT = process.env.MR_APP_ROOT || path.join(__dirname, '..');
+const SUPERVISED = process.env.MR_SUPERVISED === '1' && typeof process.send === 'function';
+const IDLE_S = Number(process.env.MR_IDLE_S) || 60; // no telemetry for this long = not driving
+// The app, the dashboard and (from 1.4.0) the bridge's own code update themselves from the
+// app's website, so changes don't need a new download.
 const UPDATE_BASE = process.env.MR_UPDATE_URL || 'https://tcmorrismsl-web.github.io/Morris-Racing-Rig-Adjustment-Tool/';
 const DATA_DIR = process.env.MR_DATA || path.join(os.homedir(), 'MorrisRacing');
 const FILES = { laps: path.join(DATA_DIR, 'laps.json'), state: path.join(DATA_DIR, 'app-state.json'), context: path.join(DATA_DIR, 'context.json') };
@@ -128,7 +133,7 @@ function status() {
   const flow = (s) => ({ packets: s.packets, receiving: !!s.last && now - s.last < 3000, last: s.last });
   return {
     bridge: true, version: VERSION, ports: PORTS, addresses: lanAddresses(),
-    app: { version: appInfo.active?.label || null, bridgeUpdate: appInfo.bridgeUpdate },
+    app: { version: appInfo.active?.label || null, bridgeUpdate: appInfo.bridgeUpdate && !bridgeInfo.staged, bridgeStaged: bridgeInfo.staged },
     forza: { ...flow(stats.forza), live: forza.live }, f1: { ...flow(stats.f1), live: f1.live, inUse: f1Race.inUse() },
     laps: laps.length, context,
   };
@@ -173,7 +178,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/dash') return json(res, 200, dashFor(url.searchParams.get('game')).state());
     if (p === '/api/engineer' && req.method === 'POST') {
       const q = await body(req, 2000);
-      const topics = ['yes', 'no', 'gaps', 'pit', 'time', 'weather', 'tyres', 'repeat'];
+      const topics = ['yes', 'no', 'wait', 'gaps', 'pit', 'time', 'weather', 'tyres', 'repeat', 'plan'];
       if (!q || !topics.includes(q.ask)) return json(res, 400, { error: 'unknown question' });
       const call = dashFor(q.game).eng.ask(q.ask);
       return json(res, 200, { ok: true, call });
@@ -234,14 +239,69 @@ function pickAppRoot() {
 let activeRoot = pickAppRoot();
 function appRoot() { return activeRoot; }
 
+// ---------------------------------------------------------------------------
+// Bridge self-update: newer bridge code is downloaded, checked, and used after a restart.
+// Under the launcher the restart happens by itself as soon as you're not driving.
+// ---------------------------------------------------------------------------
+const BRIDGE_DIR = path.join(DATA_DIR, 'bridge-update');
+const SAFE_BRIDGE_FILE = /^bridge\/[\w-]+\.js$/;
+const bridgeVersionOf = (dir) => { try { return (fs.readFileSync(path.join(dir, 'bridge.js'), 'utf8').match(/const VERSION = '([\d.]+)'/) || [])[1] || null; } catch { return null; } };
+const bridgeInfo = { staged: null };
+{ const v = bridgeVersionOf(path.join(BRIDGE_DIR, 'current')); if (v && !atLeastV(VERSION, v)) bridgeInfo.staged = v; }
+function atLeastV(have, need) { const a = String(have || '0').split('.').map(Number), b = String(need || '0').split('.').map(Number); for (let i = 0; i < 3; i++) { if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); } return true; }
+
+async function checkForBridgeUpdate(m) {
+  const b = m && m.bridge;
+  if (!b || !b.version || atLeastV(VERSION, b.version) || !Array.isArray(b.files) || !b.files.every((f) => SAFE_BRIDGE_FILE.test(f))) return;
+  let bad = [];
+  try { bad = JSON.parse(fs.readFileSync(path.join(BRIDGE_DIR, 'bad.json'), 'utf8')); } catch { /* none */ }
+  if (bad.includes(b.version)) return;
+  if (bridgeInfo.staged !== b.version) {
+    const tmp = path.join(BRIDGE_DIR, `tmp-${b.version}`);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    fs.mkdirSync(tmp, { recursive: true });
+    for (const f of b.files) {
+      const r = await fetch(`${UPDATE_BASE}${f}?v=${m.version}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`${f}: ${r.status}`);
+      const code = await r.text();
+      new vm.Script(Module.wrap(code), { filename: f }); // throws if it isn't valid code
+      fs.writeFileSync(path.join(tmp, path.basename(f)), code);
+    }
+    if (bridgeVersionOf(tmp) !== b.version) throw new Error('version mismatch');
+    fs.writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({ private: true, type: 'commonjs' }));
+    const cur = path.join(BRIDGE_DIR, 'current');
+    fs.rmSync(cur, { recursive: true, force: true });
+    fs.renameSync(tmp, cur);
+    bridgeInfo.staged = b.version;
+    log(SUPERVISED ? `Downloaded bridge update ${b.version}. It switches over by itself when you're not driving.` : `Downloaded bridge update ${b.version}. Close this window and start the bridge again to use it.`);
+  }
+  if (SUPERVISED) restartWhenIdle();
+}
+
+let restartTimer = null;
+function restartWhenIdle() {
+  if (restartTimer) return;
+  const tick = () => {
+    const last = Math.max(stats.f1.last || 0, stats.forza.last || 0);
+    if (Date.now() - last < IDLE_S * 1000) return;
+    clearInterval(restartTimer);
+    log('Switching to the updated bridge now (you are not driving). This takes a second.');
+    try { fs.writeFileSync(FILES.laps, JSON.stringify(laps)); } catch { /* ignore */ }
+    process.exit(75);
+  };
+  restartTimer = setInterval(tick, 5000);
+  tick();
+}
+
 async function checkForAppUpdate() {
   try {
     const res = await fetch(`${UPDATE_BASE}app-files.json?t=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) return;
     const m = await res.json();
+    try { await checkForBridgeUpdate(m); } catch (e) { log(`Couldn't update the bridge right now (${e.message}). Keeping this version.`); }
     if (!m || !Array.isArray(m.files) || stampNum(m) <= stampNum(appInfo.active)) return;
     if (!atLeast(VERSION, m.bridgeMin)) {
-      if (!appInfo.bridgeUpdate) log(`A newer bridge (${m.bridgeMin}) is available. Download it from the app's Data tab when you have a moment.`);
+      if (!appInfo.bridgeUpdate && !bridgeInfo.staged) log(`A newer bridge (${m.bridgeMin}) is available. Download it from the app's Data tab when you have a moment.`);
       appInfo.bridgeUpdate = true;
       return;
     }
@@ -301,7 +361,7 @@ function fatal(e) {
   console.error('  The bridge stopped because of an error:');
   console.error(`  ${e && e.stack ? e.stack : e}`);
   console.error('');
-  if (process.stdin.isTTY) {
+  if (process.stdin.isTTY && !SUPERVISED) {
     console.error('  Press Enter to close this window.');
     process.stdin.resume();
     process.stdin.once('data', () => process.exit(1));

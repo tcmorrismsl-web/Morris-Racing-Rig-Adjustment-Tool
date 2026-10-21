@@ -313,3 +313,12 @@ textarea { resize: vertical; }
 .inuse-head .link { justify-self: start; }
 .row.inuse.off .v { color: var(--gold); }
 .row.inuse.off .why { color: var(--alu); }
+
+/* Parc fermé */
+.live-card.pf { flex-direction: column; align-items: flex-start; gap: 4px; margin: 10px 0 14px; border-left: 4px solid var(--gold); }
+.live-card.pf.soon { border-left-color: var(--accent); }
+.live-card.pf b { font: 600 17px/1.2 var(--cond); color: var(--gold); }
+.row.locked .v, .row.locked .k { opacity: 0.45; }
+.row.locked .why { color: var(--muted); }
+.steps .how { display: inline-block; margin-left: 6px; padding: 1px 7px; border-radius: 999px; font-size: 12px; background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold); white-space: nowrap; }
+.locked-list { margin: 4px 0 12px; opacity: 0.75; }
